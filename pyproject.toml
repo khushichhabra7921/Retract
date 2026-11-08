@@ -1,0 +1,46 @@
+[project]
+name = "retract"
+version = "0.0.1"
+description = "Source-level retraction for multi-agent memory: lineage, guarded reads, repair and receipts."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2"]
+
+[project.optional-dependencies]
+llm = ["httpx"]
+embed = ["fastembed"]
+mem0 = ["mem0ai==2.2.1"]
+testbed = ["langgraph"]
+dashboard = ["fastapi", "jinja2", "uvicorn", "python-multipart"]
+
+[dependency-groups]
+dev = ["pytest", "pytest-cov", "ruff", "mypy", "httpx"]
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["spikes"]  # throwaway evidence scripts, kept as run
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.mypy]
+files = ["retract/core"]
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not integration and not network'"
+markers = [
+    "integration: needs optional extras (e.g. mem0) and model downloads",
+    "network: calls a hosted API (e.g. Groq); needs a key",
+]
