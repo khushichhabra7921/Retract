@@ -65,7 +65,7 @@ This is a solo, part-time build from 9 Nov to 6 Dec 2026.
 
 Notes:
 - **Raw-adapter hits are reported in two groups.** Hits on intentionally quarantined records are expected and reported separately from hits on purged records. Only the latter count against L2.
-- **L4 and Mem0 history:** Mem0 keeps old memory text in its SQLite history table after DELETE (mem0ai 2.2.1). The default plan is that the Mem0 adapter purges that memory's history rows by direct SQL, pending the spike. If that turns out not to be workable, Mem0 history residue is listed under L4 as an explicit non-guarantee.
+- **L4 and Mem0 history:** Mem0 keeps old memory text in its SQLite history table after DELETE (mem0ai 2.2.1). The spike (Nov 8) confirmed that the Mem0 adapter can purge that memory's history rows by direct SQL with no byte residue, so Mem0 history is not an L4 item. Qdrant-local `storage.sqlite` still holds deleted text in freed pages: that is L4, not established.
 
 ## Semantics
 
@@ -155,14 +155,35 @@ Repair writes by the engine use the same path. The one difference is that inputs
 - `add(..., infer=False)`.
 - `MEM0_TELEMETRY` is set inside Python *before* `import mem0`.
 - A structural/raw residue check scans Mem0's history DB.
-- The adapter purges that `memory_id`'s history rows by direct SQL (pending the spike; else L4).
+- The adapter purges that `memory_id`'s history rows by direct SQL (confirmed by the spike).
 
-**Pending verification in the spike:**
-- metadata round-trip and lookup by `retract_token`
-- history rows after delete
-- residue in the messages table and entity store
-- whether `Memory()` constructs with no LLM key (its constructor always builds an LLM client)
-- local embedder and vector-store config
+**Spike findings (Nov 8, `spikes/mem0_spike.py`; mem0ai 2.2.1, fastembed 0.9.1, qdrant-client 1.20.0, Windows, py3.12):**
+- **Construction without a key fails.** `Memory()` and any config with an `openai` LLM block but no `api_key` raise `OpenAIError: Missing credentials`.
+  - The adapter passes a placeholder LLM `api_key`. With `infer=False` the LLM is never called.
+  - Zero non-loopback connections were measured after model warm-up.
+- **Local config works:** fastembed `BAAI/bge-small-en-v1.5` (384d) plus local qdrant (`path`, `on_disk=True`) and an explicit `history_db_path`.
+  - `MEM0_DIR` is set to keep `~/.mem0` untouched.
+  - fastembed downloads models once (the embedder and qdrant's lazy `Qdrant/bm25` encoder). Do this warm-up before any network-free test.
+- **IDs:** `add()` returns a Mem0-generated uuid4, so `adapter_record_id` is confirmed and `idempotent_put = False`.
+- **Metadata round-trip:** `retract_token` and `record_id` come back under `get()["metadata"]`.
+- **`find_by_token` works two ways:**
+  - `get_all(filters={"user_id": …, "retract_token": tok})`, scoped;
+  - `vector_store.list(filters={"retract_token": tok})`, unscoped and raw.
+- **`list_ids`:** `vector_store.list(top_k=N)` (qdrant scroll), so `supports_list_ids = True`.
+- **Delete:** after delete, `get()` and `vector_store.get()` both return `None`, so `contains` can be built on `vector_store.get`.
+- **History residue confirmed:** after delete, the `history` table keeps the text in both the `ADD` row (`new_memory`) and the `DELETE` row (`old_memory`).
+- **History purge works:**
+  - `DELETE FROM history WHERE memory_id = ?` from a second sqlite3 connection with `PRAGMA secure_delete = ON`, while Mem0 is live.
+  - Afterwards `Memory.history(id) == []` and a raw byte scan of `history.db` finds no residue.
+  - Decision: **the adapter purges history by direct SQL**, so Mem0 history is not an L4 item.
+- **Messages table and entity store:** `infer=False` writes no `messages` rows and never creates the entity store.
+  - Residue there applies only to `infer=True`, which Retract does not use.
+- **L4 residue in qdrant local:** marker bytes remain in `qdrant/collection/<name>/storage.sqlite` (freed SQLite pages) after delete.
+  - This is vector-store internals and is listed under L4 as not established.
+- **Windows:** `Memory.close()` does not close the local qdrant client, and its portalocker lock blocks reopening the same path. The adapter must call `vector_store.client.close()` too.
+- The spaCy lemma model is optional. Without `mem0ai[nlp]` it logs warnings and BM25 lemmatization degrades. No action needed.
+
+**Adapter interface decided:** `MemoryAdapter` stays as specified. The Mem0 adapter sets `idempotent_put=False` and `supports_list_ids=True`, and its `delete` includes the history purge. Pin `mem0ai==2.2.1`.
 
 ## Execution (operation journal)
 **Tables:**
@@ -232,7 +253,7 @@ Each dimension reports `pass | fail | not_run`. The receipt and dashboard show t
 - **Extras:**
   - `llm`: `httpx` (timeouts, retries, `Retry-After`).
   - `embed`: `fastembed`.
-  - `mem0`: `mem0ai`, pinned after the spike.
+  - `mem0`: `mem0ai==2.2.1` (pinned by the spike).
   - `testbed`: `langgraph`.
   - `dashboard`: `fastapi`, `jinja2`, `uvicorn`, `python-multipart`.
 - **Dev:** `pytest`, `pytest-cov`, `ruff`, `mypy`, `httpx`.
