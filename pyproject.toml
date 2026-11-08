@@ -39,6 +39,7 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-m 'not integration and not network'"
 markers = [
     "integration: needs optional extras (e.g. mem0) and model downloads",
