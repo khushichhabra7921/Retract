@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -9,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
-from retract.core.errors import InputNotReadableError
+from retract.core.errors import InputNotReadableError, TombstonedSourceError
 from retract.core.models import Record, Status
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
@@ -21,7 +23,8 @@ def _marks(n: int) -> str:
 
 
 class LineageStore:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, pseudonym_key: bytes) -> None:
+        self._pseudonym_key = pseudonym_key
         # Autocommit mode: no implicit transactions, so guarded reads never hold a stale snapshot.
         self.conn = sqlite3.connect(str(path), isolation_level=None)
         self.conn.row_factory = sqlite3.Row
@@ -48,6 +51,10 @@ class LineageStore:
                     self.conn.execute("ROLLBACK")
                 raise
 
+    def source_ref(self, source_id: str) -> str:
+        """Opaque, stable reference to a source for tombstones and receipts."""
+        return hmac.new(self._pseudonym_key, source_id.encode(), hashlib.sha256).hexdigest()
+
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
         self.conn.execute("BEGIN IMMEDIATE")
@@ -71,7 +78,8 @@ class LineageStore:
         fn_op: str | None,
         fn_version: str | None,
     ) -> None:
-        """Write-path step 1: reject unreadable parents, then journal a pending row in one tx."""
+        """Write-path step 1, one tx: reject unreadable parents and tombstoned labels, then
+        journal a pending row with its edges and effective labels."""
         parent_ids = [p for p, _ in parents]
         sources = list(dict.fromkeys(explicit_sources))
         with self.tx() as c:
@@ -92,6 +100,16 @@ class LineageStore:
                     parent_ids,
                 )
             }
+            labels = sorted(inherited | set(sources))
+            refs = [self.source_ref(s) for s in labels]
+            if dead := [
+                r[0]
+                for r in c.execute(
+                    f"SELECT source_ref FROM tombstones WHERE source_ref IN ({_marks(len(refs))})",
+                    refs,
+                )
+            ]:
+                raise TombstonedSourceError(dead)
             c.execute(
                 "INSERT INTO records (record_id, agent, tier, content, status, retract_token,"
                 " fn_op, fn_version, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
@@ -116,7 +134,7 @@ class LineageStore:
             )
             c.executemany(
                 "INSERT INTO labels (record_id, source_id) VALUES (?, ?)",
-                [(record_id, s) for s in sorted(inherited | set(sources))],
+                [(record_id, s) for s in labels],
             )
 
     def activate(self, record_id: str, adapter_record_id: str) -> None:
@@ -152,6 +170,26 @@ class LineageStore:
             )
             for r in rows
         }
+
+    def block(self, source_id: str, op_id: str) -> set[str]:
+        """BLOCK core, one tx: tombstone the source and hold its whole closure.
+
+        Concurrent writes either committed their pending row first (so the recomputed closure
+        holds them) or run their write tx afterwards and are rejected (held input or
+        tombstoned label). Operations, lease lock and stale-plan check wrap this in M3.
+        """
+        with self.tx() as c:
+            ids = self.closure(source_id)
+            c.execute(
+                "INSERT OR IGNORE INTO tombstones (source_ref, op_id, created_at) VALUES (?, ?, ?)",
+                (self.source_ref(source_id), op_id, datetime.now(UTC).isoformat()),
+            )
+            c.execute(
+                f"UPDATE records SET hold_op_id = ? WHERE record_id IN ({_marks(len(ids))})"
+                " AND hold_op_id IS NULL",
+                [op_id, *ids],
+            )
+        return ids
 
     def closure(self, source_id: str) -> set[str]:
         """Records owning `source_id` plus every descendant along parent edges."""

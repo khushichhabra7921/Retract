@@ -44,3 +44,10 @@ CREATE TABLE labels (
     PRIMARY KEY (record_id, source_id)
 );
 CREATE INDEX labels_source ON labels (source_id);
+
+-- Retracted sources. source_ref = HMAC-SHA256(RETRACT_PSEUDONYM_KEY, source_id); the raw id is not stored.
+CREATE TABLE tombstones (
+    source_ref TEXT PRIMARY KEY,
+    op_id      TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);

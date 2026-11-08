@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -37,7 +38,10 @@ _STEP: ContextVar[_Step | None] = ContextVar("retract_step", default=None)
 
 class Retract:
     def __init__(self, lineage_db: str | Path, stores: Mapping[str, MemoryAdapter]) -> None:
-        self.lineage = LineageStore(lineage_db)
+        key = os.environ.get("RETRACT_PSEUDONYM_KEY")
+        if not key:
+            raise RetractError("RETRACT_PSEUDONYM_KEY is not set in the process environment")
+        self.lineage = LineageStore(lineage_db, key.encode())
         self.stores = dict(stores)
         self.registry: dict[str, Registered] = {}
 
@@ -156,6 +160,10 @@ class Retract:
             _STEP.reset(token)
 
     # -- lineage queries ------------------------------------------------------------------
+
+    def source_ref(self, source: str) -> str:
+        """Keyed pseudonym of `source`, as stored in tombstones and receipts."""
+        return self.lineage.source_ref(source)
 
     def closure(self, source: str) -> set[str]:
         """record_ids owned by `source` plus all their descendants."""

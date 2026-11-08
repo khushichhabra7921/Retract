@@ -19,3 +19,11 @@ class InputNotReadableError(RetractError):
 
 class UnknownTierError(RetractError):
     """No adapter is configured for the tier."""
+
+
+class TombstonedSourceError(RetractError):
+    """A write would carry the label of a retracted source."""
+
+    def __init__(self, source_refs: Sequence[str]) -> None:
+        self.source_refs = list(source_refs)
+        super().__init__(f"write carries retracted source(s) (source_ref): {self.source_refs}")
