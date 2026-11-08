@@ -1,0 +1,428 @@
+# Retract MVP — PLAN (Rev 3, implementation baseline)
+
+Rev 3 is the implementation baseline. No further architecture revisions unless tests reveal a concrete problem.
+
+## Changelog Rev 2 → Rev 3
+- A: EXECUTE now begins with one short `BEGIN IMMEDIATE` BLOCK transaction (ownership, recompute, stale check, tombstone, holds, journal rows). A stale plan rolls back with nothing tombstoned or held.
+- A: The global op lock is now a durable logical lock (operation row, `owner_token`, `lease_expires_at`, heartbeat). `resume` is allowed on lease expiry or owner match.
+- B: New "Write path" section: pending lineage row → adapter write → activate. New `pending` status. Two new tests (BLOCK race, crash between lineage and adapter).
+- C: New "Lineage capture contract": explicit `inputs=` plus the `rt.step` read-set. New over-retraction metric and a step read-set test.
+- D: Two IDs (`record_id`, `adapter_record_id`) and a `retract_token` stamped on every adapter write. Adapter gains `find_by_token`, `idempotent_put` and `supports_list_ids`. Resume reconciles via token; non-reconciling adapters are at-least-once.
+- D: Mem0 facts from mem0ai 2.2.1 added. The history-DB residue check and per-memory history purge are pending a spike.
+- D: New Week 1 Mem0 spike (Nov 9–10) finalizes the adapter interface. Mem0 validation moves earlier than M5.
+- E: Probes are generated locally (no LLM), held in memory, never persisted. Each verification dimension is `pass | fail | not_run`. Resume after purge records retrieval as `not_run`. New test `crash_after_purge_before_probes`.
+- F: Terminal outcomes are `completed` (retraction receipt), `contained` (containment receipt) and `failed` (no success receipt). The receipt and final op state are written in one transaction. Replacements stay held until their contamination check passes. `outcome` is added to VerificationReport.
+- G: L2 and L3 reworded exactly. Notes added on quarantined raw-adapter hits and the Mem0 history L4 note. The audit is "flags likely bypasses" everywhere.
+- H: New "Runtime vs experiments" subsection (heuristic runtime check vs independent oracle). FakeLLM leak- and paraphrase-injection modes are used in experiments.
+- I: Separate signing and pseudonym keys.
+- I: Stats reworded: Wilson / trial-level bootstrap, labeled bounds, 0/30 Wilson ≈ 11.4% and Clopper–Pearson one-sided ≈ 9.5%.
+- I: `make experiments` / `experiments-groq` / `experiments-groq-replay`, with a committed cache that carries metadata.
+- I: Dashboard uses POST + CSRF.
+- I: Test that the guard sees fresh state. Over-fetch utility note.
+- I: Windows tooling rules and a Windows clean-clone check in M0.
+- J: Capacity note, five hard checkpoints, new cut order, Week 2 Groq budget check, release-gate additions.
+- K: The external-validation workstream is removed and replaced by "Validation scope (solo, no external input)". The adoption claim is an untested hypothesis.
+- L: New "Deltas vs brief" section.
+
+## Context
+Retract is the capstone and startup MVP from `retract-project-brief.md`. It is an open-source Python SDK that records what agents derive from what. `retract(source)` finds every derived record across agents, tiers and stores. It blocks them from reads, repairs them (delete / re-derive / quarantine), and issues a receipt plus residue checks.
+
+This is a solo, part-time build from 9 Nov to 6 Dec 2026.
+
+**Claim we defend:** a vendor-neutral prototype for source-level retraction across instrumented multi-agent memory stores. It combines lineage-aware repair, guarded retrieval, auditable receipts and a controlled evaluation of residual exposure. We claim nothing about dependency tracing, selective replay or provenance-based forgetting being new on their own (see [4], [25]).
+
+**Capacity:** No other work is paused during Nov 9–Dec 6. Capacity is part-time, so the scope checkpoints are mandatory.
+
+## Decisions taken
+- **Repo:** `C:\dev\retract`. The brief is copied to `docs/` and is never edited. Local git commits; no push until the user says so.
+- **License:** Apache-2.0.
+- **uv:** installed via `pip install --user uv`. The uv PATH step is documented in the README.
+- **make:** the user runs `choco install make` once.
+- **Groq:** a key is available.
+  - FakeLLM runs all configs × 30 paired seeds.
+  - Groq runs priya and poisoned_doc with frozen prompts. The seed count is set by the Week 2 budget check.
+- **Audit:** fresh stdlib `ast`, without CodeLens.
+- **Secrets:** only from the process environment. No `.env` parsing in Make or Python. `.env.example` lists `RETRACT_SIGNING_KEY`, `RETRACT_PSEUDONYM_KEY` and `GROQ_API_KEY`. No key is ever logged or written to receipts or artifacts.
+
+## Trimmed or narrowed vs the review
+- **Public modes are `auto | delete | quarantine`.** Re-derive is a per-record action, not a mode.
+- **Graph property tests:** a seeded random-DAG generator with stdlib `random`. No `hypothesis`.
+- **Concurrency:** one executing retraction at a time, enforced by a **durable logical lock**.
+  - The lock is an `operations` row in state `executing` with `owner_token` and `lease_expires_at`, renewed by heartbeat during repair.
+  - A second retraction gets `OperationInProgressError(op_id)`.
+  - `rt.resume(op_id)` is allowed when the lease has expired or the `owner_token` matches, so a crashed process never blocks future work permanently.
+  - `shortcut: one global executing op, upgrade to per-closure locks if parallel retractions matter.`
+- **No LangGraph store adapter.** LangGraph does orchestration only; memory goes through Retract adapters. The audit flags likely bypasses via LangGraph `store.put`.
+
+## Guarantee levels (README, dashboard and RESULTS use these exact words)
+| Level | MVP |
+|---|---|
+| L1 Hidden from Retract-guarded reads | Enforced + tested |
+| L2 | Purged records are verified absent from supported adapter APIs. Quarantined records may remain physically accessible through the underlying store and are hidden only by Retract-controlled reads. |
+| L3 | Not established. `retract audit` provides best-effort detection of potential SDK bypasses but cannot prove complete read/write coverage (dynamic dispatch, indirect clients, external services, uninstrumented access). |
+| L4 Physically erased from vector index internals | **Not established** |
+| L5 Removed from backups / external caches / model weights | **Not established** |
+
+Notes:
+- **Raw-adapter hits are reported in two groups.** Hits on intentionally quarantined records are expected and reported separately from hits on purged records. Only the latter count against L2.
+- **L4 and Mem0 history:** Mem0 keeps old memory text in its SQLite history table after DELETE (mem0ai 2.2.1). The default plan is that the Mem0 adapter purges that memory's history rows by direct SQL, pending the spike. If that turns out not to be workable, Mem0 history residue is listed under L4 as an explicit non-guarantee.
+
+## Semantics
+
+### Sources and labels
+- **`explicit_sources`:**
+  - On a primary record (`rt.add`), they mean ownership.
+  - On a derived record, they mean extra source material that entered without a parent record (for example a tool output).
+- **Effective labels** = labels of current input records ∪ `explicit_sources`. The SDK computes them; the model never does.
+- **Historical vs effective lineage:** a re-derived version gets edges to its *current valid inputs* and a `supersedes` link to the old version. Labels come only from current inputs.
+- **Opaque references:**
+  - Tombstones and receipts store `source_ref = HMAC(RETRACT_PSEUDONYM_KEY, source_id)`, plus content hashes keyed with the same pseudonym key.
+  - `source_ref` stays stable across rotations of the signing key. Losing or rotating the pseudonym key breaks `source_ref` matching (documented).
+  - Keyed hashes are pseudonymous evidence, not anonymous data. Testbed IDs are synthetic.
+
+### Lineage capture contract
+- **Parent edges come from:**
+  1. explicit `inputs=` passed to an `@rt.derives` function;
+  2. a **step-scoped read-set**: inside `with rt.step(agent, tier):`, every record returned by guarded `rt.search`/`rt.get` becomes a parent of every write in that step. This over-approximates on purpose.
+- **Edge order:** explicit inputs are ordered by `position`; read-set parents are ordered by read time.
+- Testbed agents use `rt.step`. Their summaries and notes are written by `@rt.derives` functions called inside a step, which keeps them replayable.
+- Anything outside instrumented paths is not tracked (see L3).
+- Over-approximation is measured by the M8 **over-retraction rate**: records retracted or quarantined that the oracle says contain no facts from the retracted source.
+
+### Record state
+- **`status ∈ {pending, active, quarantined, retracted, tombstoned}`:**
+  - `pending` = the write is in progress (see Write path).
+  - `tombstoned` = deleted and purged.
+  - `retracted` = superseded by a re-derived version, purged.
+  - `quarantined` = hidden, with content kept.
+- `hold_op_id` (nullable) marks a record held by an executing or failed operation.
+- **Guard rule:** readable ⇔ `status = active AND hold_op_id IS NULL`.
+- A record becomes `retracted`/`tombstoned` only after its purge is verified.
+
+### Write path (normal `rt.add` / `@rt.derives`, crash-safe)
+1. **One transaction:**
+   - verify that none of the record's sources or inputs are tombstoned or held
+   - insert the lineage row with `status=pending`, its `record_id`, `retract_token` and edges
+   - commit
+2. **Adapter write**, stamped with metadata `retract_token`. Store the returned `adapter_record_id`.
+3. **Flip `status` to `active`.**
+
+Properties:
+- Pending records are unreadable.
+- The orphan scan reconciles crashes between steps: pending rows with no adapter record, and adapter records with no lineage row.
+- This also closes the race where a derive reads its inputs before BLOCK commits but writes after it: step 1 sees the held or tombstoned input and rejects the write.
+
+Repair writes by the engine use the same path. The one difference is that inputs held by **the same `op_id`** are allowed (see open item 1).
+
+### Per-record action rule (affected closure, topological order)
+1. A primary record owned by the source → **delete**.
+2. A derived record with the retracted source in its own `explicit_sources` → **quarantine** in auto mode, **delete** in delete mode.
+3. A derived record with no valid inputs left → **delete**.
+4. A derived record with valid inputs remaining:
+   - delete mode → **delete** (strict RQ2 baseline);
+   - auto mode → **re-derive** if replayable, otherwise **quarantine**.
+5. **Replayable** ⇔ the function is registered, `replayable=True`, and the registered `version` equals the stored `fn_version`. Inputs are passed in stored `position` order.
+   - Step-only writes with no `@rt.derives` function are not replayable.
+   - A missing function, version mismatch or replay error → **quarantine** and the failure is recorded.
+6. **Post-repair check** (runtime heuristic, see below): the replacement must not contain a *forbidden fact*, meaning a retracted fact that no valid input supports.
+   - The replacement is created with `hold_op_id` set. The hold is cleared only after the check passes.
+   - Hit → the replacement is quarantined, the old version stays held, and the action is marked `repair_unverified`.
+7. **Quarantine mode** → quarantine the whole closure.
+
+### Runtime vs experiments
+- **Runtime (SDK):** conservative heuristic verification. Normalized sentence-substring match plus embedding similarity at a frozen threshold. Uncertain records are quarantined.
+- **Experiments only:** an independent fact-level oracle from `testbed/data.py` (`fact_id`, `owner`, `marker` tokens, 2 paraphrases each). It measures whether each runtime decision was correct.
+- README and RESULTS must not imply that the SDK has oracle-grade ability.
+- FakeLLM has **leak-injection** mode (re-emits a forbidden fact) and **paraphrase-injection** mode (re-emits it paraphrased). Both are used in tests *and* in M8 experiments to measure runtime check FN/FP.
+
+### Adapter contract and IDs
+- **Two identifiers:**
+  - `record_id`: logical, owned by Retract.
+  - `adapter_record_id`: physical, returned by the store and stored in lineage.
+- `record_id` and `retract_token = "op_id:record_id"` (or `"write:record_id"` for normal writes) are journaled **before** the adapter write. Every adapter write stamps `retract_token` into the record's metadata.
+- **`MemoryAdapter`:**
+  - methods: `write`, `get`, `search`, `delete`, `update`, `contains`, `find_by_token(token)`, `list_ids()` (when `supports_list_ids`);
+  - capability flags: `idempotent_put`, `supports_list_ids`.
+- **On resume:** call `find_by_token` before retrying a write. If a record is found, adopt it; otherwise write.
+- An adapter that cannot reconcile is documented as **at-least-once with orphan cleanup**. Exactly-once is never claimed for it.
+
+### Mem0 notes
+**Facts checked against mem0ai 2.2.1** (re-verify on the pinned version):
+- `add()` takes no caller-supplied ID; IDs are uuid4 generated internally, hence `adapter_record_id`.
+- Mem0's SQLite history table keeps old text (`old_memory`) after DELETE. No per-record purge was found, only a whole-table reset.
+
+**Plan:**
+- `add(..., infer=False)`.
+- `MEM0_TELEMETRY` is set inside Python *before* `import mem0`.
+- A structural/raw residue check scans Mem0's history DB.
+- The adapter purges that `memory_id`'s history rows by direct SQL (pending the spike; else L4).
+
+**Pending verification in the spike:**
+- metadata round-trip and lookup by `retract_token`
+- history rows after delete
+- residue in the messages table and entity store
+- whether `Memory()` constructs with no LLM key (its constructor always builds an LLM client)
+- local embedder and vector-store config
+
+## Execution (operation journal)
+**Tables:**
+- `operations(op_id, source_ref, mode, plan_closure_hash, state, outcome, owner_token, lease_expires_at, error)`
+- `op_actions(op_id, record_id, action, state ∈ pending|running|done|failed, new_record_id, retract_token, adapter_record_id, detail)`
+
+**Phases:**
+1. **PLAN** (dry run): compute the closure and the per-record actions. No writes.
+2. **BLOCK:** one short transaction. It never stays open during LLM or adapter calls.
+   ```
+   BEGIN IMMEDIATE
+     acquire durable operation ownership (no other op 'executing' with a live lease)
+     recompute affected closure
+     compare with previewed closure
+     if stale: ROLLBACK, raise StalePlanError   -- source NOT tombstoned, nothing held
+     insert source tombstone
+     set hold_op_id on the entire closure
+     insert the operation row and all pending op_actions
+   COMMIT
+   ```
+3. **REPAIR:** each action in topological order via the write path, with tokens journaled first and a heartbeat renewing the lease.
+   - A failed parent repair means its children are not rebuilt from it; they stay held.
+   - Replacements stay held until their post-repair check passes.
+4. **PURGE:** adapter `delete` → assert `contains` is false (and Mem0 history purge) → NULL the lineage content → set the final status.
+   - Runs after all repairs, because the forbidden-fact checks need the old content.
+5. **VERIFY:** structural and adapter checks, then retrieval probes (see Verification).
+6. **FINALIZE:** in **one transaction**, insert the receipt (if any) and set the final op state and outcome.
+
+**Terminal outcomes:**
+- `completed`: all required repairs and deletions verified, with no quarantined remainder. Issues a **retraction receipt**.
+- `contained`: all affected records blocked, but some content remains quarantined (includes quarantine mode and auto-mode fallbacks). Issues a **containment receipt**. "Erasure" is never used in names or text for this outcome.
+- `failed`: required actions or checks are incomplete. Records stay held, a failure event is logged, and no success receipt is issued.
+
+**`rt.resume(op_id)`** continues from the journal and reconciles writes via `find_by_token`. Executing a finalized op again returns its stored receipt.
+
+## Verification
+Each dimension reports `pass | fail | not_run`. The receipt and dashboard show them separately.
+1. **Structural (exact):**
+   - no readable record carries the source label
+   - no readable record has an edge to a non-readable input
+   - `contains` is false for every purged id
+   - orphan scan (when `supports_list_ids`)
+   - pending-row reconciliation
+   - Mem0 history-DB scan
+2. **Retrieval residue:** probe queries run through guarded `rt.search` *and* each adapter's raw `search`. Hits on quarantined records and hits on purged records are reported separately.
+   - Probes are **generated locally**: sentence split + key tokens, with no LLM call and no network.
+   - They are held in memory only and never persisted, because they are the retracted content.
+   - Probes run after purge during uninterrupted execution.
+   - **On resume:** all structural and adapter checks are rerun. The probe inputs are gone after purge, so `retrieval_residue = not_run` (never pass).
+3. **Answer contamination:** testbed and experiments only, judged by the oracle.
+
+**Threshold:** tuned on dev seeds 0–9, frozen in `experiments/configs.py`, and reported on test seeds 10–39 with FP/FN.
+
+**Guarded search:** it over-fetches (`k×4`) so that filtering out held records does not silently shrink top-k. `shortcut: k×4 can still return <k under heavy holds, upgrade to adapter-side id filter.` The utility impact is noted in RESULTS.
+
+**Freshness:** the guard opens no long-lived SQLite read transaction (tested).
+
+## Receipts
+- **Body:** op_id, outcome, receipt type (retraction | containment), source_ref, mode, plan summary, actions (ids, keyed hashes, action, state), verification dimensions with status and n/N, timestamp, seq, prev_hash.
+- **Signature:** HMAC-SHA256 with `RETRACT_SIGNING_KEY` over canonical JSON.
+- **`receipt.verify()`** returns `VerificationReport{outcome, integrity, chain_link, execution_complete, structural, retrieval_residue}`.
+- **`rt.verify_chain()`** walks every receipt, recomputing hashes and signatures and checking seq continuity.
+- **Documented limit:** anyone with DB write access *and* the signing key can rewrite history.
+
+## Dependencies
+- **Core:** `pydantic` (API boundary models).
+- **Extras:**
+  - `llm`: `httpx` (timeouts, retries, `Retry-After`).
+  - `embed`: `fastembed`.
+  - `mem0`: `mem0ai`, pinned after the spike.
+  - `testbed`: `langgraph`.
+  - `dashboard`: `fastapi`, `jinja2`, `uvicorn`, `python-multipart`.
+- **Dev:** `pytest`, `pytest-cov`, `ruff`, `mypy`, `httpx`.
+- **Rejected:** dotenv, click, scipy, hypothesis, Alembic, NetworkX, Postgres, Docker.
+- **SQLite:** WAL, `foreign_keys=ON`, `PRAGMA user_version` migrations.
+
+## Tooling (Windows + CI)
+- Every Makefile recipe is a single `uv run python -m ...` command with no shell-specific syntax.
+- **Targets:**
+  - `test`
+  - `demo`
+  - `experiments` (FakeLLM only, no secrets)
+  - `experiments-groq` (requires `GROQ_API_KEY`)
+  - `experiments-groq-replay` (replays from the committed `experiments/cache/` with no key)
+- **Cache metadata:** Groq model id, date and prompt version. Request headers and keys are never stored.
+- **CI:** Ubuntu. M0 also includes a clean-clone check on Windows.
+
+## File layout
+```
+retract/
+  core/models.py, lineage.py, migrations/001_init.sql, sdk.py (add, derives, step, search, get, retract, resume, verify_chain)
+  core/engine.py, operations.py (journal + durable lease lock), verification.py, errors.py, interfaces.py
+  adapters/simple.py, adapters/mem0.py
+  derive/fakes.py (FakeLLM incl. fault, leak- and paraphrase-injection; FakeEmbedder), groq.py, fastembed.py, prompts.py (frozen)
+  receipts/receipt.py, probes/residue.py (local probe generation), audit.py, cli.py, dashboard/
+testbed/  data.py (seeded personas, docs, facts, oracle), agents.py, scenarios.py, run.py
+experiments/  run.py, configs.py, stats.py (Wilson, Clopper–Pearson, trial-level bootstrap), cache/, results/
+spikes/mem0_spike.py
+tests/  docs/ (retract-project-brief.md, PLAN.md, RESULTS.md)
+```
+
+## Schedule and hard checkpoints
+
+### Week 1 · Nov 9–15
+- **Mem0 spike (Nov 9–10):** run all the "pending verification" checks above. The outcome finalizes `MemoryAdapter` and decides history purge vs an L4 note. Findings are recorded in PLAN.md.
+- **M0:**
+  - uv, git, skeleton, pyproject (ruff, mypy strict on `retract/core`, markers)
+  - CI (Ubuntu, py3.11 + 3.12) and a Windows clean-clone check
+  - LICENSE, README stub (incl. uv PATH step), `.env.example`, `.gitignore`
+- **M1:** LineageStore, migrations, write path, `add`, `@rt.derives(op, agent, tier, version, replayable, inputs=)`, `rt.step`.
+- **Priya slice:** oracle facts. Naive delete leaves her facts in the summary. The closure query finds every affected descendant.
+- **Related work:** read the full methods of [4] and [25] and confirm the claim statement (optional `docs/RELATED_WORK.md`).
+- ✅ Acceptance:
+  - 3-level inheritance
+  - 3-user union
+  - diamond descendants
+  - random-DAG closure equals reachability
+  - step read-set gives Priya's label with no declared inputs
+  - crash between lineage insert and adapter write leaves an unreadable pending record that the orphan scan reports
+  - slice shows naive residue > 0
+- **Checkpoints:** Nov 10: spike done, adapter interface decided. Nov 15: M1 + slice passing.
+
+### Week 2 · Nov 16–22
+- **M2:** SimpleVectorStore (token reconciliation, `list_ids`), guard, tombstones, contract suite.
+  - ✅ 50 random queries never return a pending, held or retracted record
+  - ✅ a tombstoned write is rejected
+  - ✅ the guard sees fresh state right after revocation
+  - ✅ a write racing with BLOCK is either rejected or included in the closure, never missed
+- **M3:** engine, BLOCK transaction, durable lease lock, journal, outcomes, receipts, `verify_chain`.
+  - ✅ Priya end to end with outcome `completed`: no readable record carries her label, the summary is rebuilt from the others, and oracle honest facts are retained.
+  - ✅ Failure tests:
+    - LLM fails mid-repair → `failed`, records held, no success receipt
+    - crash after 5 actions → `resume` reconciles via `find_by_token`, no duplicates
+    - expired lease → resumable; live lease → `OperationInProgressError(op_id)`
+    - stale preview → `StalePlanError` with nothing tombstoned or held
+    - failed parent → child not rebuilt from it
+    - adapter delete fails → `failed`
+    - already retracted → no-op
+    - two retractions sharing descendants → no resurrection
+    - tampered receipt → `verify()` / `verify_chain()` fail
+    - leak-injected replacement → quarantined, outcome `contained` with a containment receipt
+    - independent support survives
+    - version mismatch → quarantined
+    - quarantine mode → `contained`
+- **M4:** local probes, raw-adapter probes, `not_run` handling.
+  - ✅ naive delete gives residue > 0
+  - ✅ Retract: structural pass and guarded retrieval residue 0 on the slice
+  - ✅ planted paraphrase miss measured as FN
+  - ✅ `crash_after_purge_before_probes`: blocking persists, no duplicate writes, `retrieval_residue = not_run`
+- **Groq budget:** compute calls per trial × configs × seeds × scenarios against current Groq rate limits. If over budget, reduce the Groq seeds and state n.
+- **Checkpoint Nov 22:** M3 done. If missed, cut M6 (audit) and the Groq runs first.
+
+### Week 3 · Nov 23–29
+- **M5:** LangGraph testbed.
+  - Agents: support, research, planning, using `rt.step`.
+  - Stores: research private memory on Mem0; everything else on SimpleVectorStore (distinct adapters).
+  - Seeded data: 20 personas and 30 docs.
+  - Logs: message and memory channels in separate JSONL files.
+  - `poisoned_doc` (benign false refund policy) measures four stages: entered memory, retrieved or promoted by other agents, influenced answers, influence gone after retraction. No prompt-injection or tool-hijack claims.
+  - Mem0 contract test (integration), including the history residue result.
+  - ✅ `uv run python -m testbed.run --scenario priya|poisoned_doc` with FakeLLM, and with Groq when a key is set.
+- **M6:** `retract audit <path>`, which flags likely bypasses.
+  - Looks at names bound to known memory clients with `.add/.upsert/.put/.add_texts/.add_documents`.
+  - Allowlist in `[tool.retract.audit]`; exit code 1.
+  - `shortcut: intra-module dataflow only, upgrade if real code passes clients across modules.`
+  - ✅ fixture tests.
+- Groq runs, cached.
+- **Checkpoint Nov 29:** feature freeze. Week 4 = minimal dashboard + experiments + docs.
+
+### Week 4 · Nov 30–Dec 6
+- **M7:** minimal dashboard on `127.0.0.1`.
+  - Destructive actions use POST + a CSRF token.
+  - Views:
+    - records table
+    - record view with lineage graph + "why does the agent know this?"
+    - retract flow: preview → confirm (stale → re-preview) → receipt view showing outcome, receipt type and the three dimensions separately
+    - failed → resumed op view
+  - `make demo` needs no manual DB edits.
+  - Fallback if cut: CLI `retract demo`.
+  - ✅ TestClient smoke tests, including a CSRF rejection.
+- **M8:** experiments and docs.
+  - **Configs:** clean, unretracted, naive_delete, strict delete, auto, quarantine. Same 30 paired seeds, data, tasks and queries for all.
+  - **Metrics:**
+    - structural residue
+    - retrieval residue (guarded / raw, purged vs quarantined)
+    - answer contamination
+    - false-fact influence per stage
+    - record preservation
+    - honest-fact retention
+    - over-retraction rate
+    - utility (incl. over-fetch impact)
+    - runtime-check FN/FP under leak/paraphrase injection
+  - **Cost, split into:** capture overhead, op, re-derive, probes, guarded-read latency.
+  - **Stats:**
+    - Unit = trial. Probes within a trial are not independent.
+    - Wilson 95% two-sided for binary trial outcomes, with n/N.
+    - Trial-level bootstrap CIs for continuous per-trial rates and paired strategy differences.
+    - For 0/n: report the Wilson upper bound (0/30 ≈ 11.4%) and optionally the exact one-sided Clopper–Pearson bound (≈ 9.5%), always labeled with the method. Never an unlabeled bound.
+  - **`docs/RESULTS.md`** is structured as a paper skeleton (abstract, related work, method, evaluation, limitations). It includes negative results and re-derivation meaning drift.
+  - **README:** guarantee table, quickstart, Mermaid diagram, API, limits, roadmap. Startup, market and adoption statements are presented as hypotheses.
+  - ✅ `make test`, `make demo` and `make experiments` from a clean clone; `make experiments-groq-replay` without a key.
+- **Checkpoint Dec 1:** experiment results exist.
+
+### Cut order (triggered by any missed checkpoint)
+1. Dashboard scope: keep the records table, retract flow and receipt view; fallback is the CLI `retract demo`.
+2. Audit (M6).
+3. Groq runs.
+
+Never cut: experiments, receipts, recovery, probes.
+
+## Release gate (definition of done)
+- **Engineering:**
+  - lineage/closure and step read-set tests
+  - pending-write race test
+  - revocation survives crash + resume, with adapter reconciliation via `find_by_token`
+  - `crash_after_purge_before_probes` gives `not_run`
+  - purged records absent from adapter APIs (L2)
+  - Mem0 history residue result recorded (purged, or listed under L4)
+  - `completed` vs `contained` outcomes and their receipt types
+  - independent support preserved
+  - receipt and chain tamper detection
+- **Research:**
+  - clean / unretracted / recovery baselines
+  - both scenarios on FakeLLM
+  - Groq with frozen prompts, committed cache and paired seeds (n stated)
+  - three residue dimensions reported separately
+  - over-retraction rate
+  - negative results, with labeled intervals
+- **Delivery:**
+  - clean-clone `make test` on Ubuntu CI and Windows
+  - Priya demo (dashboard, or CLI fallback) including one failed → resumed op
+  - README guarantees section
+  - demo recordable without manual DB edits
+
+## Validation scope (solo, no external input)
+- **Validation means** tests, failure-injection tests and the controlled M8 experiments. There is no customer, user or peer validation.
+- **One self-directed task in Week 1:** read the full methods of [4] Agentic Unlearning and [25] Dependency-Guided Rollback Repair and confirm the contribution statement. Optionally draft `docs/RELATED_WORK.md`.
+- **Explicitly UNTESTED hypothesis:** "Teams will route all agent-memory reads and writes through an SDK."
+- **Claims rule:** README and RESULTS present startup, market and adoption claims as hypotheses and claim only what tests and experiments measured.
+
+## Deltas vs brief (the brief itself is not edited)
+- Public modes are `auto|delete|quarantine`; the brief says `mode="rederive"`.
+- RQ4 (monitors, voting) is out of MVP scope and moved to future work.
+- `poisoned_doc` is a benign false-fact scenario we author. There are no prompt-injection or tool-hijack claims; the brief's "reuse published attack setups" becomes a follow-up.
+- Customer discovery, discovery calls, design partners, partner letters and pilots are out of scope for this build. So are the brief's kill/pivot criteria and its 30/90/180-day validation milestones. The adoption assumption stays untested (see Validation scope).
+- The paper is not in the 4-week scope. RESULTS.md is structured as a paper skeleton, so an arXiv draft is a reformat after Dec 6.
+- The audit uses fresh stdlib `ast`, not CodeLens. Pitch wording: "flags likely bypasses".
+- No LangGraph store adapter: the brief's feature 1 is narrowed to orchestration only.
+- Guarantee levels L2/L3 as in the Guarantee levels section.
+- `receipt.export` supports JSON only; the brief shows `export("dpdp")`.
+- One hosted model (Groq Llama 3.3); the brief's second model for generalization is future work.
+
+## Open items (need the user's decision; the default is applied until decided)
+1. **Repair writes vs held inputs.** The write path rejects held inputs, but a repair's inputs are held by its own op.
+   - Default: allow inputs held by the same `op_id` only, tested.
+2. **Step-only writes are not replayable**, so auto mode quarantines them.
+   - Default: testbed summaries and notes use `@rt.derives` inside `rt.step`, so they stay replayable.
+3. **Nov 22 checkpoint vs general cut order.**
+   - Default: a missed Nov 22 checkpoint cuts audit + Groq, because the dashboard isn't started yet. Every other checkpoint follows the general order.
+4. **Mem0 is not on the never-cut list.**
+   - Default if the spike fails badly: two separate SimpleVectorStore instances keep the cross-store case. The Mem0 limitation is reported in RESULTS.
+5. **The committed `experiments/cache/`** holds Groq outputs on synthetic data only, plus metadata. No keys or headers.
+   - Default: commit it.
