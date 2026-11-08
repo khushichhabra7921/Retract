@@ -34,7 +34,7 @@ This is a solo, part-time build from 9 Nov to 6 Dec 2026.
 **Capacity:** No other work is paused during Nov 9–Dec 6. Capacity is part-time, so the scope checkpoints are mandatory.
 
 ## Decisions taken
-- **Repo:** `C:\dev\retract`. The brief is copied to `docs/` and is never edited. Local git commits; no push until the user says so.
+- **Repo:** `C:\Users\hp\OneDrive\Desktop\Retract` (user decision: all work stays in this folder). Known risk: OneDrive syncing `.venv`, SQLite files and `.git` can cause file locks or slow installs; if that happens, pause OneDrive sync rather than move the repo. The brief is copied to `docs/` and is never edited. Local git commits; no push until the user says so.
 - **License:** Apache-2.0.
 - **uv:** installed via `pip install --user uv`. The uv PATH step is documented in the README.
 - **make:** the user runs `choco install make` once.
