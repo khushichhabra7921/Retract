@@ -3,6 +3,9 @@
 import math
 import re
 import zlib
+from collections.abc import Sequence
+
+from retract.core.errors import TransientError
 
 
 class FakeEmbedder:
@@ -17,3 +20,23 @@ class FakeEmbedder:
             vec[zlib.crc32(token.encode()) % self.dim] += 1.0
         norm = math.sqrt(sum(x * x for x in vec)) or 1.0
         return [x / norm for x in vec]
+
+
+class FakeLLM:
+    """Deterministic stand-in for an LLM summarizer: joins its inputs.
+
+    fail_after: raise TransientError once `calls` exceeds it (fault mode).
+    inject: text appended to every output (leak- or paraphrase-injection mode).
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.fail_after: int | None = None
+        self.inject: str | None = None
+
+    def summarize(self, texts: Sequence[str]) -> str:
+        self.calls += 1
+        if self.fail_after is not None and self.calls > self.fail_after:
+            raise TransientError("fake LLM unavailable")
+        out = " ".join(texts)
+        return f"{out} {self.inject}" if self.inject else out

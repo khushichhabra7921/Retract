@@ -2,33 +2,9 @@
 
 from retract import src
 from testbed.data import FACTS, facts_in, owned_by
+from testbed.slice import SUPPORT
 
 PRIYA = src.user("u_priya")
-
-
-def build(rt):
-    primaries = {
-        f.fact_id: rt.add(
-            f.text, agent="support", tier="private:support", sources=[src.user(f.owner)]
-        )
-        for f in FACTS
-    }
-
-    @rt.derives("weekly_summary", agent="support", tier="shared")
-    def weekly_summary(inputs):
-        return "Weekly summary: " + " ".join(r.content for r in inputs)
-
-    @rt.derives("follow_up_plan", agent="planning", tier="private:planning")
-    def follow_up_plan(inputs):
-        return "Plan: " + " ".join(r.content for r in inputs)
-
-    weekly_summary(inputs=list(primaries.values()))
-    with rt.step("planning", "private:planning"):
-        follow_up_plan(inputs=rt.search("whatsapp follow-ups", tier="shared", k=1))
-        # Step-only write about Arjun. The step already read the summary, so the read-set
-        # makes it a descendant of Priya too: the deliberate over-approximation (M8 metric).
-        reminder = rt.add("Reminder: " + rt.get(primaries["arjun-1"].record_id).content)
-    return primaries, reminder
 
 
 def raw_items(rt):
@@ -42,21 +18,25 @@ def test_oracle_markers_cover_paraphrases():
         assert all(f.fact_id in facts_in(p) for p in f.paraphrases)
 
 
-def test_naive_delete_leaves_residue_and_closure_finds_it(rt):
-    primaries, reminder = build(rt)
+def test_naive_delete_leaves_residue_and_closure_finds_it(rt, world):
     priya = owned_by("u_priya")
     truth = {
         item.metadata["record_id"] for _, item in raw_items(rt) if facts_in(item.content) & priya
     }
-    assert len(truth) == 4  # 2 primaries + shared summary + planning agent's plan
-
-    assert not facts_in(reminder.content) & priya
-    assert rt.closure(PRIYA) == truth | {reminder.record_id}  # covers truth; one over-retraction
-    assert all(PRIYA in rt.get(r).labels for r in truth | {reminder.record_id})
+    assert truth == {
+        world.primaries["priya-1"].record_id,
+        world.primaries["priya-2"].record_id,
+        world.summary.record_id,
+        world.plan.record_id,
+    }
+    assert not facts_in(world.reminder.content) & priya
+    # The closure covers the truth plus one over-retraction (the reminder, via the read-set).
+    assert rt.closure(PRIYA) == truth | {world.reminder.record_id}
+    assert all(PRIYA in rt.get(r).labels for r in truth | {world.reminder.record_id})
 
     # Naive delete: what a developer does today, delete the user's own memories from the store.
     for fid in priya:
-        rt.stores["private:support"].delete(primaries[fid].adapter_record_id)
+        rt.stores[SUPPORT].delete(world.primaries[fid].adapter_record_id)
 
     residue = [(tier, item) for tier, item in raw_items(rt) if facts_in(item.content) & priya]
     assert {tier for tier, _ in residue} == {"shared", "private:planning"}

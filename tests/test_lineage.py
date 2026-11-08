@@ -144,10 +144,10 @@ def test_crash_between_adapter_write_and_activate(rt, monkeypatch):
     def boom(*a):
         raise RuntimeError("crash")
 
-    monkeypatch.setattr(rt.lineage, "activate", boom)
-    with pytest.raises(RuntimeError):
-        add(rt, "Priya prefers WhatsApp.", "u_priya")
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(rt.lineage, "activate", boom)
+        with pytest.raises(RuntimeError):
+            add(rt, "Priya prefers WhatsApp.", "u_priya")
     [(rid,)] = rt.lineage.conn.execute("SELECT record_id FROM records WHERE status = 'pending'")
     assert rt.search("whatsapp", tier="private:support") == []  # in the adapter, still hidden
     report = rt.orphan_scan()

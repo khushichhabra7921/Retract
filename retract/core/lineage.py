@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -20,6 +21,24 @@ READABLE = "status = 'active' AND hold_op_id IS NULL"  # the guard rule
 
 def _marks(n: int) -> str:
     return ",".join("?" * n)
+
+
+@dataclass(frozen=True)
+class Node:
+    """Full lineage view of one record, for the engine."""
+
+    record_id: str
+    agent: str
+    tier: str
+    content: str | None
+    status: str
+    hold_op_id: str | None
+    retract_token: str
+    adapter_record_id: str | None
+    fn_op: str | None
+    fn_version: str | None
+    explicit_sources: frozenset[str]
+    parents: tuple[tuple[str, str, int], ...]  # (parent_id, kind, position), position order
 
 
 class LineageStore:
@@ -51,9 +70,13 @@ class LineageStore:
                     self.conn.execute("ROLLBACK")
                 raise
 
+    def keyed_hash(self, text: str) -> str:
+        """HMAC-SHA256 under the pseudonym key: pseudonymous evidence, not anonymous data."""
+        return hmac.new(self._pseudonym_key, text.encode(), hashlib.sha256).hexdigest()
+
     def source_ref(self, source_id: str) -> str:
         """Opaque, stable reference to a source for tombstones and receipts."""
-        return hmac.new(self._pseudonym_key, source_id.encode(), hashlib.sha256).hexdigest()
+        return self.keyed_hash(source_id)
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
@@ -77,9 +100,13 @@ class LineageStore:
         parents: Sequence[tuple[str, str]],
         fn_op: str | None,
         fn_version: str | None,
+        hold_op_id: str | None = None,
+        supersedes: str | None = None,
     ) -> None:
         """Write-path step 1, one tx: reject unreadable parents and tombstoned labels, then
-        journal a pending row with its edges and effective labels."""
+        journal a pending row with its edges and effective labels.
+
+        A repair write passes its `hold_op_id`: parents held by that same op are allowed."""
         parent_ids = [p for p, _ in parents]
         sources = list(dict.fromkeys(explicit_sources))
         with self.tx() as c:
@@ -87,8 +114,8 @@ class LineageStore:
                 r[0]
                 for r in c.execute(
                     f"SELECT record_id FROM records WHERE record_id IN ({_marks(len(parent_ids))})"
-                    f" AND {READABLE}",
-                    parent_ids,
+                    " AND status = 'active' AND (hold_op_id IS NULL OR hold_op_id = ?)",
+                    [*parent_ids, hold_op_id],
                 )
             }
             if bad := [p for p in parent_ids if p not in ok]:
@@ -112,7 +139,8 @@ class LineageStore:
                 raise TombstonedSourceError(dead)
             c.execute(
                 "INSERT INTO records (record_id, agent, tier, content, status, retract_token,"
-                " fn_op, fn_version, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+                " fn_op, fn_version, hold_op_id, supersedes, created_at)"
+                " VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
                 (
                     record_id,
                     agent,
@@ -121,6 +149,8 @@ class LineageStore:
                     retract_token,
                     fn_op,
                     fn_version,
+                    hold_op_id,
+                    supersedes,
                     datetime.now(UTC).isoformat(),
                 ),
             )
@@ -178,18 +208,22 @@ class LineageStore:
         holds them) or run their write tx afterwards and are rejected (held input or
         tombstoned label). Operations, lease lock and stale-plan check wrap this in M3.
         """
-        with self.tx() as c:
+        with self.tx():
             ids = self.closure(source_id)
-            c.execute(
-                "INSERT OR IGNORE INTO tombstones (source_ref, op_id, created_at) VALUES (?, ?, ?)",
-                (self.source_ref(source_id), op_id, datetime.now(UTC).isoformat()),
-            )
-            c.execute(
-                f"UPDATE records SET hold_op_id = ? WHERE record_id IN ({_marks(len(ids))})"
-                " AND hold_op_id IS NULL",
-                [op_id, *ids],
-            )
+            self.tombstone_and_hold(source_id, op_id, ids)
         return ids
+
+    def tombstone_and_hold(self, source_id: str, op_id: str, ids: Iterable[str]) -> None:
+        """Call inside a tx."""
+        ids = list(ids)
+        self.conn.execute(
+            "INSERT OR IGNORE INTO tombstones (source_ref, op_id, created_at) VALUES (?, ?, ?)",
+            (self.source_ref(source_id), op_id, datetime.now(UTC).isoformat()),
+        )
+        self.conn.execute(
+            f"UPDATE records SET hold_op_id = ? WHERE record_id IN ({_marks(len(ids))})",
+            [op_id, *ids],
+        )
 
     def closure(self, source_id: str) -> set[str]:
         """Records owning `source_id` plus every descendant along parent edges."""
@@ -220,3 +254,67 @@ class LineageStore:
             (tier,),
         )
         return {str(r[0]) for r in rows}
+
+    def nodes(self, record_ids: Iterable[str]) -> dict[str, Node]:
+        ids = list(dict.fromkeys(record_ids))
+        m = _marks(len(ids))
+        explicit: dict[str, set[str]] = {i: set() for i in ids}
+        for rid, source in self.conn.execute(
+            f"SELECT record_id, source_id FROM explicit_sources WHERE record_id IN ({m})", ids
+        ):
+            explicit[rid].add(source)
+        parents: dict[str, list[tuple[str, str, int]]] = {i: [] for i in ids}
+        for child, parent, kind, pos in self.conn.execute(
+            f"SELECT child_id, parent_id, kind, position FROM edges WHERE child_id IN ({m})"
+            " ORDER BY position",
+            ids,
+        ):
+            parents[child].append((parent, kind, pos))
+        return {
+            r["record_id"]: Node(
+                record_id=r["record_id"],
+                agent=r["agent"],
+                tier=r["tier"],
+                content=r["content"],
+                status=r["status"],
+                hold_op_id=r["hold_op_id"],
+                retract_token=r["retract_token"],
+                adapter_record_id=r["adapter_record_id"],
+                fn_op=r["fn_op"],
+                fn_version=r["fn_version"],
+                explicit_sources=frozenset(explicit[r["record_id"]]),
+                parents=tuple(parents[r["record_id"]]),
+            )
+            for r in self.conn.execute(f"SELECT * FROM records WHERE record_id IN ({m})", ids)
+        }
+
+    def set_status(self, record_id: str, status: Status) -> None:
+        self.conn.execute("UPDATE records SET status = ? WHERE record_id = ?", (status, record_id))
+
+    def purge(self, record_id: str, status: Status) -> None:
+        """After a verified adapter purge: drop the content and set the final status."""
+        self.conn.execute(
+            "UPDATE records SET content = NULL, status = ? WHERE record_id = ?",
+            (status, record_id),
+        )
+
+    def clear_hold(self, record_id: str) -> None:
+        self.conn.execute("UPDATE records SET hold_op_id = NULL WHERE record_id = ?", (record_id,))
+
+    def readable_with_label(self, source_id: str) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT l.record_id FROM labels l JOIN records r ON r.record_id = l.record_id"
+            " WHERE l.source_id = ? AND r.status = 'active' AND r.hold_op_id IS NULL",
+            (source_id,),
+        )
+        return [str(r[0]) for r in rows]
+
+    def readable_with_unreadable_parent(self) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT DISTINCT c.record_id FROM records c"
+            " JOIN edges e ON e.child_id = c.record_id"
+            " JOIN records p ON p.record_id = e.parent_id"
+            " WHERE c.status = 'active' AND c.hold_op_id IS NULL"
+            " AND NOT (p.status = 'active' AND p.hold_op_id IS NULL)"
+        )
+        return [str(r[0]) for r in rows]

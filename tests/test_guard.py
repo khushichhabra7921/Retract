@@ -49,10 +49,10 @@ def test_random_queries_never_return_unreadable_records(rt, monkeypatch):
             recs.append(add(rt, text, rng.choice(owners), rng.choice(tiers)))
 
     # pending: adapter write landed, activation crashed
-    monkeypatch.setattr(rt.lineage, "activate", lambda *a: None)
-    for _ in range(5):
-        add(rt, " ".join(rng.sample(WORDS, 4)), "u_ola", rng.choice(tiers))
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(rt.lineage, "activate", lambda *a: None)
+        for _ in range(5):
+            add(rt, " ".join(rng.sample(WORDS, 4)), "u_ola", rng.choice(tiers))
     # held: a BLOCK on Priya
     held = rt.lineage.block(PRIYA, "op-1")
     # purged / quarantined states as the engine (M3) will set them
@@ -150,7 +150,9 @@ def test_threaded_writes_racing_block_are_never_missed(rt, tmp_path):
     def writer():
         w = Retract(tmp_path / "lineage.db", stores=rt.stores)
         wd = w.derives("w", agent="support", tier="shared")(lambda ins: "S " + ins[0].content)
-        for _ in range(300):
+        for _ in range(100_000):  # until BLOCK has rejected a few writes
+            if len(rejected) >= 3:
+                break
             try:
                 done.append(wd(inputs=[p.record_id]).record_id)
             except (InputNotReadableError, TombstonedSourceError):

@@ -436,6 +436,17 @@ Never cut: experiments, receipts, recovery, probes.
 - `receipt.export` supports JSON only; the brief shows `export("dpdp")`.
 - One hosted model (Groq Llama 3.3); the brief's second model for generalization is future work.
 
+## Implementation decisions (M1–M3; the user may overrule any)
+- **Transient vs replay errors.** A derive function raises `TransientError` for retryable infrastructure failures (LLM or network down). During REPAIR this fails the operation: records stay held and `resume` continues later. Any other exception is a replay error, which quarantines the record (rule 5). This is how "LLM fails mid-repair → `failed`" and rule 5 coexist.
+- **Rule 6 hit:** the replacement is quarantined, and the old version is still purged in PURGE. Children are not rebuilt from an unverified replacement.
+- **REPAIR stops at the first transient failure.** Later actions, including children, stay pending and held.
+- **A structural verification failure ends the op `failed`,** with no receipt. The orphan scan is global, so stray adapter items anywhere fail the check.
+- **Holds by another op.** BLOCK raises `OperationInProgressError(other_op)` if any affected record is held by a non-finalized op. FINALIZE clears the op's holds.
+- **A tombstoned source is a no-op.** If the source is already tombstoned by a finalized op, `retract` returns that op's receipt. If that op is failed or executing, it raises `OperationInProgressError`.
+- **Receipts carry no raw content or source ids:** record ids, keyed content hashes, actions, effects and verification dimensions only.
+- **Schema:** all tables are in `001_init.sql` (no database has shipped yet). `user_version` migrations start from the first release.
+- **Delivered early:** the minimal guarded `search` and `SimpleVectorStore` landed in M1, because the step read-set needs them. `MemoryAdapter.update` is left out until a caller needs it.
+
 ## Open items (need the user's decision; the default is applied until decided)
 1. **Repair writes vs held inputs.** The write path rejects held inputs, but a repair's inputs are held by its own op.
    - Default: allow inputs held by the same `op_id` only, tested.

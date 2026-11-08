@@ -1,4 +1,4 @@
-"""Public SDK: lineage-capturing writes and guarded reads."""
+"""Public SDK: lineage-capturing writes, guarded reads, retraction and receipts."""
 
 from __future__ import annotations
 
@@ -9,11 +9,17 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal, overload
 
+from retract.core.engine import Engine
 from retract.core.errors import InputNotReadableError, RetractError, UnknownTierError
 from retract.core.interfaces import MemoryAdapter
 from retract.core.lineage import LineageStore
-from retract.core.models import OrphanReport, Record
+from retract.core.models import Mode, OrphanReport, Plan, Record
+from retract.core.operations import Journal
+from retract.core.verification import Embed
+from retract.derive.fakes import FakeEmbedder
+from retract.receipts import receipt as receipts
 
 DeriveFn = Callable[[list[Record]], str]
 
@@ -37,13 +43,23 @@ _STEP: ContextVar[_Step | None] = ContextVar("retract_step", default=None)
 
 
 class Retract:
-    def __init__(self, lineage_db: str | Path, stores: Mapping[str, MemoryAdapter]) -> None:
+    def __init__(
+        self,
+        lineage_db: str | Path,
+        stores: Mapping[str, MemoryAdapter],
+        *,
+        embed: Embed | None = None,
+        lease_seconds: float = 60.0,
+    ) -> None:
         key = os.environ.get("RETRACT_PSEUDONYM_KEY")
         if not key:
             raise RetractError("RETRACT_PSEUDONYM_KEY is not set in the process environment")
         self.lineage = LineageStore(lineage_db, key.encode())
         self.stores = dict(stores)
         self.registry: dict[str, Registered] = {}
+        self.owner_token = uuid.uuid4().hex  # identifies this process as an op lease owner
+        self.journal = Journal(self.lineage, self.owner_token, lease_seconds)
+        self.engine = Engine(self, self.journal, embed or FakeEmbedder())
 
     def close(self) -> None:
         self.lineage.close()
@@ -158,6 +174,34 @@ class Retract:
             yield
         finally:
             _STEP.reset(token)
+
+    # -- retraction -----------------------------------------------------------------------
+
+    @overload
+    def retract(self, source: str, mode: Mode = ..., *, dry_run: Literal[True]) -> Plan: ...
+    @overload
+    def retract(
+        self, source: str, mode: Mode = ..., *, dry_run: Literal[False] = ...
+    ) -> receipts.Receipt: ...
+    def retract(
+        self, source: str, mode: Mode = "auto", *, dry_run: bool = False
+    ) -> Plan | receipts.Receipt:
+        """Preview (`dry_run=True`) or execute retraction of everything derived from `source`.
+
+        Returns a receipt for `completed` or `contained`; raises RetractionFailedError when the
+        operation ends `failed` (records stay held; call `resume`)."""
+        plan = self.engine.plan(source, mode)
+        return plan if dry_run else self.engine.execute(plan, source)
+
+    def resume(self, op_id: str) -> receipts.Receipt:
+        """Continue an interrupted or failed operation from its journal."""
+        return self.engine.resume(op_id)
+
+    def receipt(self, op_id: str) -> receipts.Receipt | None:
+        return receipts.load(self.lineage.conn, op_id)
+
+    def verify_chain(self) -> receipts.ChainReport:
+        return receipts.verify_chain(self.lineage.conn)
 
     # -- lineage queries ------------------------------------------------------------------
 

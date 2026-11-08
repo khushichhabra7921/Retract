@@ -51,3 +51,46 @@ CREATE TABLE tombstones (
     op_id      TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+-- Operation journal. An 'executing' row with a live lease is the durable global lock.
+CREATE TABLE operations (
+    op_id             TEXT PRIMARY KEY,
+    source_ref        TEXT NOT NULL,
+    mode              TEXT NOT NULL CHECK (mode IN ('auto', 'delete', 'quarantine')),
+    plan_closure_hash TEXT NOT NULL,
+    state             TEXT NOT NULL CHECK (state IN ('executing', 'failed', 'finalized')),
+    outcome           TEXT CHECK (outcome IN ('completed', 'contained', 'failed')),
+    owner_token       TEXT,
+    lease_expires_at  REAL,
+    error             TEXT,
+    created_at        TEXT NOT NULL
+);
+CREATE INDEX operations_state ON operations (state);
+
+-- One row per affected record, in topological order (seq).
+-- effect: what actually happened (may differ from the planned action, e.g. replay fallback).
+CREATE TABLE op_actions (
+    op_id             TEXT NOT NULL REFERENCES operations (op_id),
+    record_id         TEXT NOT NULL REFERENCES records (record_id),
+    seq               INTEGER NOT NULL,
+    action            TEXT NOT NULL CHECK (action IN ('delete', 'quarantine', 'rederive')),
+    reason            TEXT NOT NULL,
+    state             TEXT NOT NULL CHECK (state IN ('pending', 'running', 'done', 'failed')),
+    effect            TEXT CHECK (effect IN ('deleted', 'quarantined', 'rederived',
+                                             'replacement_quarantined')),
+    content_hash      TEXT,  -- HMAC(pseudonym key, content) taken at BLOCK
+    new_record_id     TEXT,  -- journaled before the replacement write
+    retract_token     TEXT,  -- "op_id:record_id", stamped on the replacement's adapter item
+    adapter_record_id TEXT,  -- purged adapter item, re-checked by VERIFY
+    detail            TEXT,
+    PRIMARY KEY (op_id, record_id)
+);
+
+-- Hash-chained, signed receipts. body is canonical JSON.
+CREATE TABLE receipts (
+    seq       INTEGER PRIMARY KEY,
+    op_id     TEXT NOT NULL UNIQUE REFERENCES operations (op_id),
+    body      TEXT NOT NULL,
+    hash      TEXT NOT NULL,  -- sha256(body)
+    signature TEXT NOT NULL   -- HMAC-SHA256(RETRACT_SIGNING_KEY, body)
+);
