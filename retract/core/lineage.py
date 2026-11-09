@@ -318,3 +318,15 @@ class LineageStore:
             " AND NOT (p.status = 'active' AND p.hold_op_id IS NULL)"
         )
         return [str(r[0]) for r in rows]
+
+    def independent_primaries(self, source_id: str) -> list[str]:
+        """Content of readable primary records not labeled with `source_id`: independent
+        support that a retracted fact may legitimately still appear in."""
+        rows = self.conn.execute(
+            "SELECT r.content FROM records r WHERE r.status = 'active' AND r.hold_op_id IS NULL"
+            " AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.child_id = r.record_id)"
+            " AND NOT EXISTS (SELECT 1 FROM labels l"
+            " WHERE l.record_id = r.record_id AND l.source_id = ?)",
+            (source_id,),
+        )
+        return [str(r[0]) for r in rows]

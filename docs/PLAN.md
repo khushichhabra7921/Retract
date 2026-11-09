@@ -453,6 +453,16 @@ Never cut: experiments, receipts, recovery, probes.
    - Global integrity checks: no readable record has an unreadable input, and no unrelated orphans.
    - A failure raises `StructuralVerificationError(source_failures, global_failures)`, and both lists are stored in `operations.error`. On success, the receipt reports `structural.source` and `structural.global` separately.
 
+**M4 decisions (the user may overrule any):**
+- **Retracted material** = content of the op's records that name the source in `explicit_sources` (owned primaries and explicit-source derived records). Both the post-repair check and the probes use it.
+- **Probes:** each sentence of the material, plus a key-token query (up to 5 words, 4+ letters, minus stopwords). Each probe runs through guarded `rt.search` (k=5) and raw `store.search` (k=5) on every tier. Counts are probes with at least one hit, per group.
+- **What counts as a hit:** an item containing a retracted sentence that is not backed by an *independent primary*, meaning a readable record with no parents that does not carry the source label. This is how independent support survives.
+- **Hit groups and their effect:**
+  - `raw_quarantined` is expected and reported separately.
+  - `guarded`, `raw_purged` and `raw_unexpected` (active or untracked items) fail retrieval residue. That failure joins the source-specific structural failures (`no_retrieval_residue`), so the op ends `failed`.
+- **When probes run:** probes are built before PURGE and kept in memory only. If a resume finds the material already purged, `retrieval_residue = not_run`.
+- **Measurement:** `testbed.data.confusion(runtime_flagged, oracle_leaked)` labels each runtime decision TP/FP/FN/TN for M8. The planted paraphrase is a measured FN.
+
 **Other decisions (the user may overrule any):**
 - **REPAIR stops at the first failure that fails the op.** Later actions, including children, stay pending and held.
 - **Holds by another op.** BLOCK raises `OperationInProgressError(other_op)` if any affected record is held by a non-finalized op. FINALIZE clears the op's holds.

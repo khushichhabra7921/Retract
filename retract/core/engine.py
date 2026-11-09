@@ -26,6 +26,7 @@ from retract.core.lineage import Node
 from retract.core.models import Mode, Plan, PlannedAction, Status
 from retract.core.operations import Action, Journal
 from retract.core.verification import Embed, forbidden_facts
+from retract.probes import residue
 from retract.receipts import receipt as receipts
 
 if TYPE_CHECKING:
@@ -35,7 +36,6 @@ log = logging.getLogger("retract")
 
 PURGED = ("retracted", "tombstoned")
 QUARANTINED_EFFECTS = ("quarantined", "replacement_quarantined")
-RETRACTED_MATERIAL = ("owned", "explicit_source")  # reasons whose content is the source's
 
 
 def _closure_hash(ids: Iterable[str]) -> str:
@@ -217,9 +217,13 @@ class Engine:
 
     def _run(self, op_id: str, source: str) -> receipts.Receipt:
         try:
-            self._repair(op_id)
+            retracted = self._retracted_material(op_id, source)
+            self._repair(op_id, retracted)
+            # Probes are built from retracted content before PURGE, held in memory only. If a
+            # resume finds that content already purged, retrieval residue is not_run.
+            probes = residue.make_probes(retracted) if retracted is not None else None
             self._purge(op_id)
-            return self._finalize(op_id, self._verify(op_id, source))
+            return self._finalize(op_id, self._verify(op_id, source, probes, retracted or []))
         except OperationInProgressError:
             raise  # lease lost: the new owner decides the outcome
         except Exception as e:
@@ -230,12 +234,17 @@ class Engine:
 
     # -- REPAIR -----------------------------------------------------------------------------
 
-    def _repair(self, op_id: str) -> None:
+    def _retracted_material(self, op_id: str, source: str) -> list[str] | None:
+        """Content of the op's records that name `source` explicitly (its own material).
+        None once any of it has been purged."""
+        nodes = self.lineage.nodes(a.record_id for a in self.journal.actions(op_id))
+        material = [n.content for n in nodes.values() if source in n.explicit_sources]
+        if not material or any(c is None for c in material):
+            return None
+        return [c for c in material if c]
+
+    def _repair(self, op_id: str, retracted: list[str] | None) -> None:
         actions = {a.record_id: a for a in self.journal.actions(op_id)}
-        material = self.lineage.nodes(
-            a.record_id for a in actions.values() if a.reason in RETRACTED_MATERIAL
-        )
-        retracted = [n.content for n in material.values() if n.content]
         for rid in list(actions):
             a = actions[rid]
             if a.state == "done" or a.action == "delete":
@@ -244,7 +253,8 @@ class Engine:
             if a.action == "quarantine":
                 self._quarantine(op_id, rid, a.reason)
             else:
-                self._rederive(op_id, a, actions, retracted)
+                # retracted is only None after PURGE began, when every repair is done
+                self._rederive(op_id, a, actions, retracted or [])
             actions[rid] = self.journal.action(op_id, rid)
 
     def _quarantine(self, op_id: str, record_id: str, detail: str | None) -> None:
@@ -354,7 +364,9 @@ class Engine:
 
     # -- VERIFY / FINALIZE --------------------------------------------------------------------
 
-    def _verify(self, op_id: str, source: str) -> dict[str, Any]:
+    def _verify(
+        self, op_id: str, source: str, probes: list[str] | None, retracted: list[str]
+    ) -> dict[str, Any]:
         """Structural checks in two groups, reported separately (M8 interpretability):
         source-specific (is this source's information still reachable?) and global integrity
         (can complete lineage coverage be established?). For the MVP either one failing ends
@@ -393,9 +405,18 @@ class Engine:
                 "no_unrelated_orphans": not (set(pending) - ours) and not stray_other,
             },
         }
+        if probes:
+            # shortcut: supports = every independent readable primary, upgrade to an index if big
+            retrieval = residue.measure(
+                self.rt, probes, retracted, self.lineage.independent_primaries(source), self.embed
+            )
+        else:
+            retrieval = {"status": "not_run", "reason": "retracted content already purged"}
         failed = {
             g: sorted(k for k, ok in checks.items() if not ok) for g, checks in groups.items()
         }
+        if retrieval["status"] == "fail":
+            failed["source"].append("no_retrieval_residue")
         if failed["source"] or failed["global"]:
             raise StructuralVerificationError(failed["source"], failed["global"])
         total = sum(len(c) for c in groups.values())
@@ -407,8 +428,7 @@ class Engine:
                 "source": {"status": "pass", "passed": len(groups["source"])},
                 "global": {"status": "pass", "passed": len(groups["global"])},
             },
-            # probes arrive in M4
-            "retrieval_residue": {"status": "not_run", "reason": "no probes in this version"},
+            "retrieval_residue": retrieval,
         }
 
     def _finalize(self, op_id: str, verification: dict[str, Any]) -> receipts.Receipt:

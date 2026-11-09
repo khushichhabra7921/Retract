@@ -71,3 +71,10 @@ def facts_in(text: str) -> set[str]:
 
 def owned_by(owner: str) -> set[str]:
     return {f.fact_id for f in FACTS if f.owner == owner}
+
+
+def confusion(runtime_flagged: bool, oracle_leaked: bool) -> str:
+    """Label one runtime decision against the oracle: TP, FP, FN or TN."""
+    return {(True, True): "TP", (True, False): "FP", (False, True): "FN", (False, False): "TN"}[
+        (runtime_flagged, oracle_leaked)
+    ]

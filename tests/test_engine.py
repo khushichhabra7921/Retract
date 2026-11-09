@@ -95,7 +95,7 @@ def test_priya_end_to_end_completed(rt, world):
     assert HONEST <= readable_facts(rt)
 
     report = receipt.verify()
-    assert report.ok and report.structural == "pass" and report.retrieval_residue == "not_run"
+    assert report.ok and report.structural == "pass" and report.retrieval_residue == "pass"
     assert rt.verify_chain().ok
     exported = receipt.export()
     assert "u_priya" not in exported and "WhatsApp" not in exported  # pseudonymous evidence

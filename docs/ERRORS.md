@@ -93,3 +93,13 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 
 ### 21. mypy: `Need type annotation for "stray_ours"`
 - **Fix:** annotated both lists as `list[str]`.
+
+## M4 (probes, retrieval residue)
+
+### 22. `test_priya_end_to_end_completed`: `'pass' == 'not_run'`
+- **Cause:** expected. Before M4, retrieval residue was always `not_run`. The probes now run and pass.
+- **Fix:** the assertion now expects `pass`.
+
+### 23. A true-positive test that could not fail
+- **Cause:** it computed `oracle_leaked` as `... or flagged`, so the runtime result leaked into the oracle side.
+- **Fix:** the oracle now runs over every replacement the engine wrote, quarantined ones included. The TP, FN and TN tests all use that same independent oracle.
