@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from retract.core.verification import Embed, forbidden_facts, sentences
@@ -50,6 +51,7 @@ def measure(
     unexpected (active or untracked items). Counts are probes with at least one hit.
     """
 
+    @cache  # the same items come back for many probes; check each once
     def leaks(content: str | None) -> bool:
         return bool(content) and bool(forbidden_facts(content or "", retracted, supported, embed))
 
@@ -57,7 +59,7 @@ def measure(
     for probe in probes:
         found: set[str] = set()
         for tier, store in rt.stores.items():
-            if any(leaks(r.content) for r in rt.search(probe, tier=tier, k=K)):
+            if any(leaks(r.content) for r in rt.guarded_search(probe, tier=tier, k=K)):
                 found.add("guarded")
             raw = [item for item in store.search(probe, K) if leaks(item.content)]
             status = rt.lineage.records([i.metadata.get("record_id", "") for i in raw])

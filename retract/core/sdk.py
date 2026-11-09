@@ -151,6 +151,12 @@ class Retract:
         return record
 
     def search(self, query: str, *, tier: str, k: int = 5) -> list[Record]:
+        results = self.guarded_search(query, tier=tier, k=k)
+        self._note_reads(results)
+        return results
+
+    def guarded_search(self, query: str, *, tier: str, k: int = 5) -> list[Record]:
+        """Guarded search that never joins a step's read-set (used by residue probes)."""
         # shortcut: k×4 can still return <k under heavy holds, upgrade to adapter-side id filter.
         hits = self._store(tier).search(query, k * 4)
         ids = [h.metadata.get("record_id", "") for h in hits]
@@ -161,9 +167,7 @@ class Retract:
             # The adapter id must match lineage, so stray duplicates of a record stay hidden.
             if record and record.adapter_record_id == hit.adapter_record_id:
                 out.setdefault(rid, record)
-        results = list(out.values())[:k]
-        self._note_reads(results)
-        return results
+        return list(out.values())[:k]
 
     @contextmanager
     def step(self, agent: str, tier: str) -> Iterator[None]:

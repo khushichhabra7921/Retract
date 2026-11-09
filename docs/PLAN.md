@@ -461,6 +461,7 @@ Never cut: experiments, receipts, recovery, probes.
   - `raw_quarantined` is expected and reported separately.
   - `guarded`, `raw_purged` and `raw_unexpected` (active or untracked items) fail retrieval residue. That failure joins the source-specific structural failures (`no_retrieval_residue`), so the op ends `failed`.
 - **When probes run:** probes are built before PURGE and kept in memory only. If a resume finds the material already purged, `retrieval_residue = not_run`.
+- **Probe reads are not lineage.** Probes use `Retract.guarded_search`, which never joins a step's read-set, so running `retract` inside an `rt.step` adds no parents to that step's writes.
 - **Measurement:** `testbed.data.confusion(runtime_flagged, oracle_leaked)` labels each runtime decision TP/FP/FN/TN for M8. The planted paraphrase is a measured FN.
 
 **Other decisions (the user may overrule any):**

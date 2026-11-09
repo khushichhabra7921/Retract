@@ -103,3 +103,16 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 ### 23. A true-positive test that could not fail
 - **Cause:** it computed `oracle_leaked` as `... or flagged`, so the runtime result leaked into the oracle side.
 - **Fix:** the oracle now runs over every replacement the engine wrote, quarantined ones included. The TP, FN and TN tests all use that same independent oracle.
+
+### 24. Working tree rolled back to pre-M4 after the M4 commit
+- **Symptom:** after commit 32d6076, six files (engine, lineage, PLAN, ERRORS, testbed data, a test) held their pre-M4 contents again, uncommitted, and `retract/probes/residue.py` was deleted. New files (`tests/test_residue.py`, `retract/probes/__init__.py`) were untouched.
+- **Cause:** unknown. The pattern (only files with older versions reverted) fits OneDrive restoring older copies, which PLAN.md lists as a known risk of keeping the repo in OneDrive. A manual undo is also possible.
+- **Fix:** a clean clone of the commit passed (ruff, mypy, 62 tests). With the user's approval, `git restore .` discarded the rollback. If it happens again, pause OneDrive sync for this folder.
+
+### 25. Probe searches joined the caller's `rt.step` read-set
+- **Cause:** residue probes used public `rt.search`, which records reads into an active step. A retraction run inside a step made every probe result a parent of the step's later writes, creating false lineage.
+- **Fix:** `Retract.guarded_search` does the guarded search without recording reads, and `rt.search` wraps it. Probes use `guarded_search`. The regression test fails on the old code.
+
+### 26. Probe measurement re-checked the same content for every probe
+- **Cause:** `measure` ran the forbidden-fact heuristic, embeddings included, on each returned item for each probe and tier. Cheap with FakeEmbedder, but slow with fastembed in M8.
+- **Fix:** the leak check is memoized per content inside one `measure` call, so the cache lives only as long as that call. A test asserts one check per distinct content.

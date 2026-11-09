@@ -128,3 +128,31 @@ def test_crash_after_purge_before_probes(rt, world, monkeypatch):
         s.get(i).metadata["retract_token"] for s in rt.stores.values() for i in s.list_ids()
     )
     assert set(tokens.values()) == {1}  # no duplicate writes
+
+
+def test_probe_reads_do_not_join_an_active_step(rt, world):
+    with rt.step("planning", "private:planning"):
+        rt.retract(PRIYA)  # probes run guarded searches inside the caller's step
+        note = rt.add("Unrelated note written after the retraction.")
+    assert (
+        rt.lineage.conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE child_id = ?", (note.record_id,)
+        ).fetchone()[0]
+        == 0
+    )
+
+
+def test_each_returned_item_is_checked_once(rt, world, monkeypatch):
+    from retract.probes import residue
+
+    seen = Counter()
+    real = residue.forbidden_facts
+
+    def counting(candidate, *args):
+        seen[candidate] += 1
+        return real(candidate, *args)
+
+    monkeypatch.setattr(residue, "forbidden_facts", counting)
+    probes = make_probes(PRIYA_TEXTS)
+    measure(rt, probes, PRIYA_TEXTS, [], FakeEmbedder())
+    assert len(probes) > 1 and seen and set(seen.values()) == {1}  # once per content, not per probe
