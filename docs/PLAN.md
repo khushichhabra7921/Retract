@@ -123,7 +123,7 @@ Repair writes by the engine use the same path. The one difference is that inputs
    - auto mode → **re-derive** if replayable, otherwise **quarantine**.
 5. **Replayable** ⇔ the function is registered, `replayable=True`, and the registered `version` equals the stored `fn_version`. Inputs are passed in stored `position` order.
    - Step-only writes with no `@rt.derives` function are not replayable.
-   - A missing function, version mismatch or replay error → **quarantine** and the failure is recorded.
+   - A missing function, version mismatch or known replay error (`ReplayError`) → **quarantine** and the failure is recorded. Transient and unexpected errors fail the op (see Implementation decisions).
 6. **Post-repair check** (runtime heuristic, see below): the replacement must not contain a *forbidden fact*, meaning a retracted fact that no valid input supports.
    - The replacement is created with `hold_op_id` set. The hold is cleared only after the check passes.
    - Hit → the replacement is quarantined, the old version stays held, and the action is marked `repair_unverified`.
@@ -436,11 +436,25 @@ Never cut: experiments, receipts, recovery, probes.
 - `receipt.export` supports JSON only; the brief shows `export("dpdp")`.
 - One hosted model (Groq Llama 3.3); the brief's second model for generalization is future work.
 
-## Implementation decisions (M1–M3; the user may overrule any)
-- **Transient vs replay errors.** A derive function raises `TransientError` for retryable infrastructure failures (LLM or network down). During REPAIR this fails the operation: records stay held and `resume` continues later. Any other exception is a replay error, which quarantines the record (rule 5). This is how "LLM fails mid-repair → `failed`" and rule 5 coexist.
-- **Rule 6 hit:** the replacement is quarantined, and the old version is still purged in PURGE. Children are not rebuilt from an unverified replacement.
-- **REPAIR stops at the first transient failure.** Later actions, including children, stay pending and held.
-- **A structural verification failure ends the op `failed`,** with no receipt. The orphan scan is global, so stray adapter items anywhere fail the check.
+## Implementation decisions (M1–M3)
+
+**M3 implementation decisions (final, approved by the user):**
+1. **Errors during repair.**
+   - Temporary failures cause a resumable failed operation.
+   - Known replay failures quarantine the affected record.
+   - Unexpected exceptions fail the operation rather than silently becoming containment.
+   - In code:
+     - `TransientError` → op `failed`, holds kept, action detail `transient: <type>`, resumable.
+     - `ReplayError` (and engine-detected cases: not registered, version mismatch, no valid inputs) → quarantine and continue.
+     - Any other exception → op `failed`, holds kept, the error recorded in `operations.error` and the action detail `unexpected: <type>`.
+2. **Failed post-repair check.** When a replacement fails post-repair verification, it is quarantined and the old version is purged. Successful containment is reported separately from completed retraction (`contained` with a containment receipt vs `completed` with a retraction receipt). Children are not rebuilt from an unverified replacement.
+3. **Structural verification.** It scans every registered store for orphans. Source-specific residue and unrelated global lineage-integrity failures are reported separately. For the MVP, either failure may prevent a completed outcome.
+   - Source-specific checks: all actions done, no readable record carries the source label, purged ids absent from adapters, no orphans from this op.
+   - Global integrity checks: no readable record has an unreadable input, and no unrelated orphans.
+   - A failure raises `StructuralVerificationError(source_failures, global_failures)`, and both lists are stored in `operations.error`. On success, the receipt reports `structural.source` and `structural.global` separately.
+
+**Other decisions (the user may overrule any):**
+- **REPAIR stops at the first failure that fails the op.** Later actions, including children, stay pending and held.
 - **Holds by another op.** BLOCK raises `OperationInProgressError(other_op)` if any affected record is held by a non-finalized op. FINALIZE clears the op's holds.
 - **A tombstoned source is a no-op.** If the source is already tombstoned by a finalized op, `retract` returns that op's receipt. If that op is failed or executing, it raises `OperationInProgressError`.
 - **Receipts carry no raw content or source ids:** record ids, keyed content hashes, actions, effects and verification dimensions only.

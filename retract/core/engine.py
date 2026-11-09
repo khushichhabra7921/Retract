@@ -15,9 +15,11 @@ from typing import TYPE_CHECKING, Any
 
 from retract.core.errors import (
     OperationInProgressError,
+    ReplayError,
     RetractError,
     RetractionFailedError,
     StalePlanError,
+    StructuralVerificationError,
     TransientError,
 )
 from retract.core.lineage import Node
@@ -282,10 +284,14 @@ class Engine:
             current = self.lineage.records(inputs)
             try:
                 content = reg.fn([current[i] for i in inputs])
-            except TransientError:
-                raise
-            except Exception as e:
+            except ReplayError as e:  # known replay failure: contain this record, continue
                 return self._quarantine(op_id, old.record_id, f"replay_error: {type(e).__name__}")
+            except Exception as e:  # transient or unexpected: fail the op, keep holds
+                kind = "transient" if isinstance(e, TransientError) else "unexpected"
+                self.journal.update_action(
+                    op_id, old.record_id, state="failed", detail=f"{kind}: {type(e).__name__}"
+                )
+                raise
             self.lineage.insert_pending(
                 record_id=new_id,
                 agent=old.agent,
@@ -349,26 +355,58 @@ class Engine:
     # -- VERIFY / FINALIZE --------------------------------------------------------------------
 
     def _verify(self, op_id: str, source: str) -> dict[str, Any]:
+        """Structural checks in two groups, reported separately (M8 interpretability):
+        source-specific (is this source's information still reachable?) and global integrity
+        (can complete lineage coverage be established?). For the MVP either one failing ends
+        the op `failed`."""
         actions = self.journal.actions(op_id)
         nodes = self.lineage.nodes(a.record_id for a in actions)
-        checks = {
-            "all_actions_done": all(a.state == "done" for a in actions),
-            "no_readable_record_carries_source_label": not self.lineage.readable_with_label(source),
-            "no_readable_record_has_unreadable_input": (
-                not self.lineage.readable_with_unreadable_parent()
-            ),
-            "purged_ids_absent_from_adapters": all(
-                not self.rt._store(nodes[a.record_id].tier).contains(a.adapter_record_id)
-                for a in actions
-                if a.adapter_record_id
-            ),
-            "orphan_scan_clean": self.rt.orphan_scan().clean,
+        ours = set(nodes) | {a.new_record_id for a in actions if a.new_record_id}
+        orphans = self.rt.orphan_scan()
+        pending = orphans.pending_no_adapter_record + orphans.pending_adapter_written
+        stray_ours: list[str] = []
+        stray_other: list[str] = []
+        for tier, adapter_id in orphans.adapter_no_lineage:
+            item = self.rt._store(tier).get(adapter_id)
+            meta = item.metadata if item else {}
+            mine = meta.get("record_id") in ours or meta.get("retract_token", "").startswith(
+                f"{op_id}:"
+            )
+            (stray_ours if mine else stray_other).append(adapter_id)
+        groups = {
+            "source": {
+                "all_actions_done": all(a.state == "done" for a in actions),
+                "no_readable_record_carries_source_label": (
+                    not self.lineage.readable_with_label(source)
+                ),
+                "purged_ids_absent_from_adapters": all(
+                    not self.rt._store(nodes[a.record_id].tier).contains(a.adapter_record_id)
+                    for a in actions
+                    if a.adapter_record_id
+                ),
+                "no_orphans_from_this_op": not (set(pending) & ours) and not stray_ours,
+            },
+            "global": {
+                "no_readable_record_has_unreadable_input": (
+                    not self.lineage.readable_with_unreadable_parent()
+                ),
+                "no_unrelated_orphans": not (set(pending) - ours) and not stray_other,
+            },
         }
-        failed = sorted(k for k, ok in checks.items() if not ok)
-        if failed:
-            raise RetractError(f"structural verification failed: {failed}")
+        failed = {
+            g: sorted(k for k, ok in checks.items() if not ok) for g, checks in groups.items()
+        }
+        if failed["source"] or failed["global"]:
+            raise StructuralVerificationError(failed["source"], failed["global"])
+        total = sum(len(c) for c in groups.values())
         return {
-            "structural": {"status": "pass", "passed": len(checks), "total": len(checks)},
+            "structural": {
+                "status": "pass",
+                "passed": total,
+                "total": total,
+                "source": {"status": "pass", "passed": len(groups["source"])},
+                "global": {"status": "pass", "passed": len(groups["global"])},
+            },
             # probes arrive in M4
             "retrieval_residue": {"status": "not_run", "reason": "no probes in this version"},
         }

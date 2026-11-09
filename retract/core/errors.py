@@ -32,8 +32,15 @@ class TombstonedSourceError(RetractError):
 class TransientError(RetractError):
     """Raised by derive functions for retryable infrastructure failures (LLM or network down).
 
-    During repair it fails the operation (records stay held, `resume` later) instead of
-    quarantining the record as an ordinary replay error would."""
+    During repair it fails the operation: records stay held and `resume` continues later."""
+
+
+class ReplayError(RetractError):
+    """Raised by derive functions for a known, deterministic replay failure (inputs the
+    function can no longer handle). During repair the record is quarantined and the op goes on.
+
+    Any exception that is neither TransientError nor ReplayError is treated as a bug: the
+    operation fails with holds kept, so a broken function is never reported as containment."""
 
 
 class OperationInProgressError(RetractError):
@@ -54,3 +61,17 @@ class RetractionFailedError(RetractError):
     def __init__(self, op_id: str, reason: str) -> None:
         self.op_id = op_id
         super().__init__(f"retraction {op_id} failed: {reason}")
+
+
+class StructuralVerificationError(RetractError):
+    """VERIFY failed. `source_failures`: the source's information may still be reachable.
+    `global_failures`: unrelated lineage-integrity problems (e.g. an orphan from another
+    record), so complete coverage cannot be established."""
+
+    def __init__(self, source_failures: Sequence[str], global_failures: Sequence[str]) -> None:
+        self.source_failures = list(source_failures)
+        self.global_failures = list(global_failures)
+        super().__init__(
+            f"structural verification failed: source-specific={self.source_failures}"
+            f" global-integrity={self.global_failures}"
+        )

@@ -8,12 +8,14 @@ import pytest
 from retract import Retract, src
 from retract.core.errors import (
     OperationInProgressError,
+    ReplayError,
     RetractError,
     RetractionFailedError,
     StalePlanError,
+    StructuralVerificationError,
 )
 from testbed.data import FACTS, facts_in, owned_by
-from testbed.slice import PLANNING, SUPPORT, register
+from testbed.slice import PLANNING, SHARED, SUPPORT, register
 
 PRIYA, ARJUN = src.user("u_priya"), src.user("u_arjun")
 PRIYA_FACTS = owned_by("u_priya")
@@ -136,6 +138,9 @@ def test_llm_fails_mid_repair_then_resume(rt, world, llm):
     op_id = e.value.op_id
     assert tuple(rows(rt, "SELECT state, outcome FROM operations")[0]) == ("failed", "failed")
     assert rt.receipt(op_id) is None  # no success receipt
+    assert rows(rt, "SELECT detail FROM op_actions WHERE state = 'failed'")[0][0] == (
+        "transient: TransientError"
+    )
     for r in (world.summary, world.plan, world.reminder, world.primaries["priya-1"]):
         assert not readable(rt, r.record_id)  # held
     assert not readable_facts(rt) & PRIYA_FACTS
@@ -357,3 +362,73 @@ def test_unregistered_function_is_quarantined(rt, world, tmp_path):
     reasons = {a["record_id"]: a["reason"] for a in receipt.body["actions"]}
     assert reasons[world.summary.record_id] == "not_registered"
     fresh.close()
+
+
+# -- refined rules: replay errors vs bugs, source vs global verification ---------------------
+
+
+def test_known_replay_error_quarantines_and_continues(rt, world):
+    reg = rt.registry["reminder"]
+
+    def refuses(inputs):
+        raise ReplayError("input format no longer supported")
+
+    rt.registry["reminder"] = dataclasses.replace(reg, fn=refuses)
+    receipt = rt.retract(PRIYA)
+    assert (receipt.outcome, receipt.receipt_type) == ("contained", "containment")
+    effects = {a["record_id"]: (a["effect"], a["detail"]) for a in receipt.body["actions"]}
+    assert effects[world.reminder.record_id] == ("quarantined", "replay_error: ReplayError")
+    assert effects[world.summary.record_id][0] == "rederived"  # the op went on
+    structural = receipt.body["verification"]["structural"]
+    assert structural["source"]["status"] == structural["global"]["status"] == "pass"
+    assert receipt.verify().ok
+
+
+def test_unexpected_exception_fails_the_op_instead_of_containment(rt, world):
+    reg = rt.registry["reminder"]
+
+    def buggy(inputs):
+        return inputs.nope  # AttributeError: a software bug, not an unreplayable memory
+
+    rt.registry["reminder"] = dataclasses.replace(reg, fn=buggy)
+    with pytest.raises(RetractionFailedError) as e:
+        rt.retract(PRIYA)
+    assert isinstance(e.value.__cause__, AttributeError)
+    state, outcome, error = rows(rt, "SELECT state, outcome, error FROM operations")[0]
+    assert (state, outcome) == ("failed", "failed") and "AttributeError" in error
+    assert tuple(
+        rows(
+            rt, "SELECT state, detail FROM op_actions WHERE record_id = ?", world.reminder.record_id
+        )[0]
+    ) == ("failed", "unexpected: AttributeError")
+    assert rt.receipt(e.value.op_id) is None
+    assert not readable(rt, world.reminder.record_id)  # holds preserved
+
+    rt.registry["reminder"] = reg  # bug fixed
+    assert rt.resume(e.value.op_id).outcome == "completed"
+
+
+def test_unrelated_orphan_is_a_global_integrity_failure(rt, world):
+    stray = rt.stores[SHARED].write("written around the SDK", {})  # not Priya's, not ours
+    with pytest.raises(RetractionFailedError) as e:
+        rt.retract(PRIYA)
+    cause = e.value.__cause__
+    assert isinstance(cause, StructuralVerificationError)
+    assert cause.source_failures == [] and cause.global_failures == ["no_unrelated_orphans"]
+    assert (
+        "global-integrity=['no_unrelated_orphans']"
+        in rows(rt, "SELECT error FROM operations")[0][0]
+    )
+    assert not readable_facts(rt) & PRIYA_FACTS  # Priya's own information is not reachable
+
+    rt.stores[SHARED].delete(stray)  # lineage coverage restored
+    assert rt.resume(e.value.op_id).outcome == "completed"
+
+
+def test_source_specific_residue_is_reported_separately(rt, world, monkeypatch):
+    monkeypatch.setattr(rt.lineage, "readable_with_label", lambda source: ["still-readable"])
+    with pytest.raises(RetractionFailedError) as e:
+        rt.retract(PRIYA)
+    cause = e.value.__cause__
+    assert cause.source_failures == ["no_readable_record_carries_source_label"]
+    assert cause.global_failures == []
