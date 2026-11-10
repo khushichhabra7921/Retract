@@ -464,6 +464,25 @@ Never cut: experiments, receipts, recovery, probes.
 - **Probe reads are not lineage.** Probes use `Retract.guarded_search`, which never joins a step's read-set, so running `retract` inside an `rt.step` adds no parents to that step's writes.
 - **Measurement:** `testbed.data.confusion(runtime_flagged, oracle_leaked)` labels each runtime decision TP/FP/FN/TN for M8. The planted paraphrase is a measured FN.
 
+**M5 decisions (the user may overrule any):**
+- **Tiers, one adapter each:** `private:support`, `private:research` (Mem0), `private:planning`, `shared` and `kb`. Retraction always crosses distinct adapters. `--store simple` swaps Mem0 for a SimpleVectorStore. CI and the default test run use that swap; the Mem0 variants are integration tests.
+- **Graph:** support → research → planning (LangGraph), each node inside `rt.step`.
+  - **support:** reads the persona's facts (k=2) and KB docs (k=2), and writes an `account_brief` to `shared`.
+  - **research:** reads the persona's brief (k=1) and a KB doc (k=1), and writes a `research_note` to Mem0.
+  - **planning:** reads `shared` (k=2) and writes an `action_plan`. It then answers from guarded reads of `shared`, `planning` and `kb`, without writing.
+  - All writes go through `@rt.derives`, so they are replayable.
+- **Data:** 3 hand-written + 17 seeded personas (2 facts each) and 30 docs: 28 KB docs, the true refund policy (`RP-30`, d29) and the poisoned one (`RP-90`, d30). Every fact has a unique code-word marker. Seed 2026.
+- **Questions:**
+  - priya: "What do we know about {name}?" The first wording ("How should we follow up…") lexically matched only Priya's "follow-ups" fact and inflated contamination to 20/20.
+  - poisoned_doc: "What is the refund window for {name}'s purchase?"
+- **Logs:** `memory.jsonl` holds ids, tiers and labels only, so it carries no residue. `messages.jsonl` holds content; it is outside Retract's scope, and its hits are reported as `message_log_lines_with_target`.
+- **Keys:** `testbed.run` generates ephemeral keys when they are unset. The data is synthetic, and receipts from such a run verify only inside that process.
+- **Groq:** `retract/derive/groq.py` (httpx; Retry-After and backoff; `TransientError` after retries) with frozen prompts `v1`. The live Groq run and the response cache are still to do (no key in the build shell; the cache comes with the experiments).
+- **First FakeLLM results (both research stores):**
+  - priya: 6 affected records over 3 agents and 4 tiers, outcome `completed`. Contaminated answers go from 1/20 to 0, and residue is 0.
+  - poisoned_doc: entered memory once, promoted to support/shared 19, research 19 and planning 20. It influenced 20/20 answers, and the influence is gone after retraction (59 records, `completed`).
+  - Runtime: about 12 s with the simple store, and 50–80 s with Mem0.
+
 **Other decisions (the user may overrule any):**
 - **REPAIR stops at the first failure that fails the op.** Later actions, including children, stay pending and held.
 - **Holds by another op.** BLOCK raises `OperationInProgressError(other_op)` if any affected record is held by a non-finalized op. FINALIZE clears the op's holds.

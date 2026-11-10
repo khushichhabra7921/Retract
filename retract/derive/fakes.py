@@ -40,3 +40,28 @@ class FakeLLM:
             raise TransientError("fake LLM unavailable")
         out = " ".join(texts)
         return f"{out} {self.inject}" if self.inject else out
+
+    def answer(self, question: str, contexts: Sequence[str]) -> str:
+        """Extractive answer: context sentences sharing a content word with the question."""
+        self.calls += 1
+        if self.fail_after is not None and self.calls > self.fail_after:
+            raise TransientError("fake LLM unavailable")
+        words = _content_words(question)
+        picked = [
+            s
+            for c in contexts
+            for s in re.split(r"(?<=[.!?])\s+", c)
+            if s.strip() and words & _content_words(s)
+        ]
+        out = " ".join(dict.fromkeys(picked)) or "No relevant information."
+        return f"{out} {self.inject}" if self.inject else out
+
+
+_STOP = frozenset(
+    "about and are can does for from has have how its know our should that the this was what"
+    " when where which who why will with would you your".split()
+)
+
+
+def _content_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"\w+", text.lower()) if len(w) >= 3 and w not in _STOP}

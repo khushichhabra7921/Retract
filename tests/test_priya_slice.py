@@ -1,7 +1,7 @@
 """M1 Priya slice: naive delete leaves her facts downstream; the closure finds every one."""
 
 from retract import src
-from testbed.data import FACTS, facts_in, owned_by
+from testbed.data import ALL_FACTS, DOC_FACTS, PERSONAS, facts_in, owned_by
 from testbed.slice import SUPPORT
 
 PRIYA = src.user("u_priya")
@@ -13,9 +13,12 @@ def raw_items(rt):
 
 
 def test_oracle_markers_cover_paraphrases():
-    for f in FACTS:
+    assert len(PERSONAS) == 20 and len(DOC_FACTS) == 30
+    markers = [f.marker.lower() for f in ALL_FACTS]
+    assert len(markers) == len(set(markers))  # one fact per marker
+    for f in ALL_FACTS:
         assert facts_in(f.text) == {f.fact_id}
-        assert all(f.fact_id in facts_in(p) for p in f.paraphrases)
+        assert all(facts_in(p) == {f.fact_id} for p in f.paraphrases)
 
 
 def test_naive_delete_leaves_residue_and_closure_finds_it(rt, world):

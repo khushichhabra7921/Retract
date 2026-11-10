@@ -19,7 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10
         with:
           python-version: ${{ matrix.python }}
-      - run: uv sync --locked
+      - run: uv sync --locked --extra testbed --extra llm
       - run: uv run ruff check .
       - run: uv run mypy
       - run: uv run python -m pytest

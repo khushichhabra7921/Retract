@@ -2,14 +2,23 @@
 
 import pytest
 
+from retract.adapters.mem0 import Mem0Adapter, local_config
 from retract.adapters.simple import SimpleVectorStore
 
-ADAPTERS = [pytest.param(SimpleVectorStore, id="simple")]
+ADAPTERS = [
+    pytest.param(lambda tmp: SimpleVectorStore(), id="simple"),
+    pytest.param(
+        lambda tmp: Mem0Adapter(local_config(tmp)), id="mem0", marks=pytest.mark.integration
+    ),
+]
 
 
 @pytest.fixture(params=ADAPTERS)
-def store(request):
-    return request.param()
+def store(request, tmp_path):
+    s = request.param(tmp_path)
+    yield s
+    if hasattr(s, "close"):
+        s.close()
 
 
 def meta(n):

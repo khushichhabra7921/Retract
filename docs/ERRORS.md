@@ -116,3 +116,16 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 ### 26. Probe measurement re-checked the same content for every probe
 - **Cause:** `measure` ran the forbidden-fact heuristic, embeddings included, on each returned item for each probe and tier. Cheap with FakeEmbedder, but slow with fastembed in M8.
 - **Fix:** the leak check is memoized per content inside one `measure` call, so the cache lives only as long as that call. A test asserts one check per distinct content.
+
+## M5 (Mem0 adapter, LangGraph testbed)
+
+### 27. Patch to `testbed/data.py` failed: `AssertionError` on the `facts_in` block
+- **Cause:** an inline Python string replacement in a bash heredoc did not match the file. The exact escaping mismatch was not identified.
+- **Fix:** wrote the patch and the new code block as separate script files and spliced by index. A self-check over all 70 facts then passed.
+
+### 28. Priya scenario showed Priya's facts in 20 of 20 answers
+- **Cause:** a measurement artifact, not a bug. Every question said "follow up", and only Priya's fact contains "follow-ups", so her brief ranked high for every persona and the extractive answer kept her sentence.
+- **Fix:** the priya question is now "What do we know about {name}?", and FakeLLM's answer stopwords include "about" and "know". The result: 1/20 before, 0 after.
+
+### 29. Ruff `E501` (run.py docstring) and `F401` (unused `FACTS` import)
+- **Fix:** shortened the docstring line and ran `ruff check --fix`.
