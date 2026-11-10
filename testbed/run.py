@@ -1,6 +1,6 @@
 """Run a testbed scenario: python -m testbed.run --scenario priya|poisoned_doc.
 
-Options: --llm fake|groq, --store mem0|simple, --out DIR.
+Options: --llm fake|groq, --model GROQ_MODEL_ID, --store mem0|simple, --out DIR.
 FakeLLM by default (offline, deterministic). `--llm groq` needs GROQ_API_KEY and the `llm` extra.
 `--store mem0` (default) needs the `mem0` and `embed` extras.
 """
@@ -26,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--llm", choices=("fake", "groq"), default="fake")
     ap.add_argument("--store", choices=("mem0", "simple"), default="mem0",
                     help="backing store for the research agent's private memory")  # fmt: skip
+    ap.add_argument("--model", help="Groq model id (default: retract.derive.groq.MODEL)")
     ap.add_argument("--out", type=Path, help="run directory (default: runs/<scenario>-<time>)")
     args = ap.parse_args(argv)
 
@@ -38,9 +39,9 @@ def main(argv: list[str] | None = None) -> int:
 
     llm: LLM
     if args.llm == "groq":
-        from retract.derive.groq import GroqLLM
+        from retract.derive.groq import MODEL, GroqLLM
 
-        llm = GroqLLM()
+        llm = GroqLLM(model=args.model or MODEL)
     else:
         llm = FakeLLM()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")

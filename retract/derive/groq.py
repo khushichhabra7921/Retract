@@ -69,9 +69,18 @@ class GroqLLM:
                 self.sleep(_retry_after(r) or 2.0**attempt)
                 continue
             if r.status_code >= 400:
-                raise RetractError(f"groq HTTP {r.status_code}")
+                raise RetractError(f"groq HTTP {r.status_code}: {_error_detail(r)}")
             return str(r.json()["choices"][0]["message"]["content"]).strip()
         raise AssertionError("unreachable")
+
+
+def _error_detail(r: httpx.Response) -> str:
+    """Groq's own error code and message (never contains the key), e.g. model_not_found."""
+    try:
+        err = r.json()["error"]
+        return f"{err.get('code') or err.get('type')}: {str(err.get('message', ''))[:200]}"
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return r.text[:200] or "no details"
 
 
 def _retry_after(r: httpx.Response) -> float | None:

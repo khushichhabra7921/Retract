@@ -61,3 +61,10 @@ def test_groq_requires_key(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     with pytest.raises(RetractError, match="GROQ_API_KEY"):
         GroqLLM()
+
+
+def test_groq_error_shows_groqs_reason(monkeypatch):
+    body = {"error": {"message": "The model `x` does not exist", "code": "model_not_found"}}
+    llm, _, _ = groq(monkeypatch, [httpx.Response(404, json=body)])
+    with pytest.raises(RetractError, match="404: model_not_found: The model `x` does not exist"):
+        llm.summarize(["a"])

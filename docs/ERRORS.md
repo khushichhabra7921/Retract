@@ -129,3 +129,7 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 
 ### 29. Ruff `E501` (run.py docstring) and `F401` (unused `FACTS` import)
 - **Fix:** shortened the docstring line and ran `ruff check --fix`.
+
+### 30. `retract.core.errors.RetractError: groq HTTP 404` on the first live Groq run
+- **Cause:** most likely the model id. Groq's deprecations page lists `llama-3.3-70b-versatile` with shutdown 08/16/26 (replacements `openai/gpt-oss-120b` or `qwen/qwen3.6-27b`), but its models page still lists it, so this is not confirmed. The client also hid Groq's own error message.
+- **Fix:** errors now include Groq's code and message (for example `404: model_not_found: ...`), and `testbed.run --model <id>` selects the model. The default is unchanged until the user picks a replacement, because PLAN.md names Llama 3.3.
