@@ -120,7 +120,7 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 ## M5 (Mem0 adapter, LangGraph testbed)
 
 ### 27. Patch to `testbed/data.py` failed: `AssertionError` on the `facts_in` block
-- **Cause:** an inline Python string replacement in a bash heredoc did not match the file. The exact escaping mismatch was not identified.
+- **Cause:** found later (entry 31): double backslashes in a shell-embedded Python patch reach Python as single ones, so `\b` became a backspace character and the search string never matched.
 - **Fix:** wrote the patch and the new code block as separate script files and spliced by index. A self-check over all 70 facts then passed.
 
 ### 28. Priya scenario showed Priya's facts in 20 of 20 answers
@@ -133,3 +133,12 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 ### 30. `retract.core.errors.RetractError: groq HTTP 404` on the first live Groq run
 - **Cause:** the model id. Groq shut down `llama-3.3-70b-versatile` on 08/16/26 (replacements `openai/gpt-oss-120b` or `qwen/qwen3.6-27b`). Confirmed by the user's `GET /openai/v1/models`: the model is absent from the list, and both scenarios then ran with `--model openai/gpt-oss-120b`. The client also hid Groq's own error message.
 - **Fix:** errors now include Groq's code and message (for example `404: model_not_found: ...`), and `testbed.run --model <id>` selects the model. The default is unchanged until the user picks a replacement, because PLAN.md names Llama 3.3.
+
+### 31. Shell-embedded Python patches cannot carry backslashes
+- **Symptom:** a patch asserting `s.count(a) == 1` failed. The search text showed `\x08` (a backspace) where the source had the regex `\b`.
+- **Cause:** double backslashes typed in the command arrive as single ones, so Python reads `\b` as a backspace escape. This was also the cause of entry 27, and it hit again while writing this entry.
+- **Fix:** edits that contain backslashes go through the editor tool, not a heredoc. The failed patch had written nothing, because it asserts every pair before writing.
+
+### 32. poisoned_doc on Groq: 0 influenced answers before retraction
+- **Cause:** a measurement design issue, not a Retract bug. "What is the refund window for {name}'s purchase?" let `gpt-oss-120b` reply "No relevant information" (17/20), because the policy is not about that customer. The poisoned doc was in context in 38 of 40 pre-retraction answer calls. FakeLLM's word-overlap answers had hidden this (20/20).
+- **Fix:** the question is now "{name} bought from us 60 days ago. Can {name} still get a refund?", so the policy decides the answer. The oracle also counts the stated window ("90 days"/"90-day") as the false fact. FakeLLM still shows 20/20 → 0. The Groq re-run is pending.

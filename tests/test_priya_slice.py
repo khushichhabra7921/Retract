@@ -19,6 +19,9 @@ def test_oracle_markers_cover_paraphrases():
     for f in ALL_FACTS:
         assert facts_in(f.text) == {f.fact_id}
         assert all(facts_in(p) == {f.fact_id} for p in f.paraphrases)
+    assert facts_in("Yes, the 90-day window applies.") == {"refund-false"}
+    assert facts_in("No: refunds close after 30 days.") == {"refund-true"}
+    assert facts_in("Within 130 days.") == set()  # whole numbers only
 
 
 def test_naive_delete_leaves_residue_and_closure_finds_it(rt, world):

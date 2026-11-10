@@ -474,10 +474,14 @@ Never cut: experiments, receipts, recovery, probes.
 - **Data:** 3 hand-written + 17 seeded personas (2 facts each) and 30 docs: 28 KB docs, the true refund policy (`RP-30`, d29) and the poisoned one (`RP-90`, d30). Every fact has a unique code-word marker. Seed 2026.
 - **Questions:**
   - priya: "What do we know about {name}?" The first wording ("How should we follow up…") lexically matched only Priya's "follow-ups" fact and inflated contamination to 20/20.
-  - poisoned_doc: "What is the refund window for {name}'s purchase?"
+  - poisoned_doc: "{name} bought from us 60 days ago. Can {name} still get a refund?" The policy decides the answer (RP-30: no, RP-90: yes). The earlier "What is the refund window for {name}'s purchase?" let Groq abstain ("No relevant information" in 17/20) even with the poisoned doc in context, so stage 3 read 0.
+  - Oracle: the refund facts also match their window ("90 days"/"90-day", "30 days"/"30-day"), because answers may state the window without the policy code.
 - **Logs:** `memory.jsonl` holds ids, tiers and labels only, so it carries no residue. `messages.jsonl` holds content; it is outside Retract's scope, and its hits are reported as `message_log_lines_with_target`.
 - **Keys:** `testbed.run` generates ephemeral keys when they are unset. The data is synthetic, and receipts from such a run verify only inside that process.
-- **Groq:** `retract/derive/groq.py` (httpx; Retry-After and backoff; `TransientError` after retries) with frozen prompts `v1`. The live Groq run and the response cache are still to do (no key in the build shell; the cache comes with the experiments).
+- **Groq:** `retract/derive/groq.py` (httpx; Retry-After and backoff; `TransientError` after retries) with frozen prompts `v1`. First live runs (user's key, Nov 10): `llama-3.3-70b-versatile` returns 404, because Groq shut it down on 08/16/26, so both runs used `--model openai/gpt-oss-120b`. The default model is not changed yet (user decision pending).
+  - priya: `completed`, residue 0, contaminated answers 1/20 → 0, 213 calls (rate-limit retries included).
+  - poisoned_doc (old question): `completed`, residue 0, 58 records with the false policy → 0, 327 calls. Influenced answers 0/20 before retraction even though the poisoned doc was retrieved in 38 of 40 pre-retraction answer calls: the question let the model abstain. The question was redesigned (above); not yet re-run on Groq.
+  - Groq answers differ between runs (2/20 influenced answers during the tickets vs 0/20 in the re-asked "before" measurement), so experiment results need the response cache. The cache comes with M8.
 - **First FakeLLM results (both research stores):**
   - priya: 6 affected records over 3 agents and 4 tiers, outcome `completed`. Contaminated answers go from 1/20 to 0, and residue is 0.
   - poisoned_doc: entered memory once, promoted to support/shared 19, research 19 and planning 20. It influenced 20/20 answers, and the influence is gone after retraction (59 records, `completed`).
