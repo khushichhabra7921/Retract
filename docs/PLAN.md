@@ -487,6 +487,16 @@ Never cut: experiments, receipts, recovery, probes.
   - poisoned_doc: entered memory once, promoted to support/shared 19, research 19 and planning 20. It influenced 20/20 answers, and the influence is gone after retraction (59 records, `completed`).
   - Runtime: about 12 s with the simple store, and 50–80 s with Mem0.
 
+**M6 decisions (the user may overrule any):**
+- **Entry points:** `retract audit <path>...` (`[project.scripts]`, or `python -m retract.cli audit`). The code is in `retract/audit.py`, stdlib `ast` and `tomllib` only.
+- **What is flagged:** a call to `.add/.upsert/.put/.add_texts/.add_documents` on a value bound to a known memory client. On Retract's own adapters, `.write` is flagged too, because it skips lineage and the guard.
+  - Known clients: mem0 (`Memory`, `MemoryClient` and the async variants), LangGraph stores (`BaseStore`, `InMemoryStore`, Postgres, SQLite, `get_store()`), LangChain vector stores (`langchain_core.vectorstores` plus anything under `langchain_community.vectorstores`, `langchain_chroma`, `langchain_qdrant`, `langchain_pinecone` and `langchain_postgres`), `qdrant_client`, `chromadb`, `pinecone` and Retract's adapters.
+  - Bindings: constructor calls, `from_*` classmethods, `x = y` aliases, `self.x = ...`, `with ... as x`, annotated parameters and variables (`store: BaseStore`, also `Optional[...]` and string annotations), and collection factories (`get_or_create_collection`, `create_collection`, `get_collection`, `Index`).
+- **Limits:** intra-module dataflow only. Bindings are also scope-insensitive: a name bound to a client anywhere in the module counts everywhere. Relative imports are not resolved.
+- **Allowlist:** `[tool.retract.audit] allow` in the nearest `pyproject.toml` holds fnmatch patterns on paths relative to that file. This repo allows `retract/adapters/*` (the SDK's own write path) and `spikes/*`, and it audits clean.
+- **Walk:** directories starting with `.`, `__pycache__` and `node_modules` are skipped, so `.venv` is never scanned.
+- **Exit codes:** 0 clean, 1 on any finding or a file that does not parse (a gate never passes it silently), 2 on a missing path or a bad allowlist.
+
 **Other decisions (the user may overrule any):**
 - **REPAIR stops at the first failure that fails the op.** Later actions, including children, stay pending and held.
 - **Holds by another op.** BLOCK raises `OperationInProgressError(other_op)` if any affected record is held by a non-finalized op. FINALIZE clears the op's holds.

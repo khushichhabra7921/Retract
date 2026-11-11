@@ -142,3 +142,24 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 ### 32. poisoned_doc on Groq: 0 influenced answers before retraction
 - **Cause:** a measurement design issue, not a Retract bug. "What is the refund window for {name}'s purchase?" let `gpt-oss-120b` reply "No relevant information" (17/20), because the policy is not about that customer. The poisoned doc was in context in 38 of 40 pre-retraction answer calls. FakeLLM's word-overlap answers had hidden this (20/20).
 - **Fix:** the question is now "{name} bought from us 60 days ago. Can {name} still get a refund?", so the policy decides the answer. The oracle also counts the stated window ("90 days"/"90-day") as the false fact. FakeLLM still shows 20/20 → 0. The Groq re-run is pending.
+
+## M6 (`retract audit`)
+
+### 33. Audit test expected `QdrantClient(":memory:").upsert`, got `QdrantClient(':memory:').upsert`
+- **Cause:** the test was wrong, not the audit. Findings print the receiver through `ast.unparse`, which normalizes string quotes to single quotes.
+- **Fix:** the test expects the unparsed form.
+
+### 34. Ruff `E501` in `tests/test_audit.py`
+- **Fix:** `ruff format` on the test file.
+
+### 35. `pyproject.toml` turned CRLF after a scripted edit
+- **Cause:** `Path.write_text` on Windows writes `\r\n`. `.gitattributes` would have normalized it on commit, but the working copy showed a CRLF warning.
+- **Fix:** rewrote the file with LF bytes. Scripted edits write bytes or pass `newline="\n"`.
+
+### 36. `uv sync --locked --extra testbed --extra llm` uninstalled 30 packages
+- **Cause:** `uv sync` makes the venv match exactly the extras named. Running CI's sync command locally removed the `mem0` and `embed` extras (mem0ai, fastembed, qdrant-client and their deps).
+- **Fix:** re-ran it with `--extra mem0 --extra embed` added, which reinstalled the same 30 packages. The Mem0 integration tests passed afterwards. Local syncs name every extra in use.
+
+### 37. `retract audit nope.py` printed only `retract audit: nope.py`
+- **Cause:** `FileNotFoundError(path)` stringifies to the bare path.
+- **Fix:** the message is now `no such file or directory: <path>` (exit code 2). Findings are also sorted by line, since `ast.walk` yields them breadth-first.

@@ -8,6 +8,9 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2"]
 
+[project.scripts]
+retract = "retract.cli:main"
+
 [project.optional-dependencies]
 llm = ["httpx"]
 embed = ["fastembed"]
@@ -32,6 +35,10 @@ extend-exclude = ["spikes"]  # throwaway evidence scripts, kept as run
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.retract.audit]
+# The adapters are the SDK's own write path; spikes are throwaway evidence scripts.
+allow = ["retract/adapters/*", "spikes/*"]
 
 [tool.mypy]
 files = ["retract/core"]
