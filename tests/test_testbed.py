@@ -2,11 +2,15 @@
 
 import json
 
+import httpx
 import pytest
 
 pytest.importorskip("langgraph")
 
+from retract.derive import prompts  # noqa: E402
+from retract.derive.cache import ResponseCache  # noqa: E402
 from retract.derive.fakes import FakeLLM  # noqa: E402
+from retract.derive.groq import GroqLLM  # noqa: E402
 from testbed.run import main  # noqa: E402
 from testbed.scenarios import run_scenario  # noqa: E402
 
@@ -47,6 +51,44 @@ def test_cli_runs_a_scenario(tmp_path, capsys):
     assert main(["--scenario", "priya", "--store", "simple", "--out", str(tmp_path)]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["scenario"] == "priya" and out["llm"]["name"] == "fake"
+
+
+def fake_groq(request):
+    """Groq stand-in backed by FakeLLM, so a "live" run is offline and deterministic."""
+    msgs = json.loads(request.content)["messages"]
+    system, user = msgs[0]["content"], msgs[1]["content"]
+    if system == prompts.SUMMARIZE:
+        text = FakeLLM().summarize([line[2:] for line in user.split("\n")])
+    else:
+        ctx, question = user.rsplit("\n\nQuestion: ", 1)
+        contexts = [line[2:] for line in ctx.split("\n")[1:] if line.startswith("- ")]
+        text = FakeLLM().answer(question, contexts)
+    return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+
+
+def test_groq_run_replays_from_cache_without_key_or_network(tmp_path, monkeypatch, capsys):
+    cache = tmp_path / "cache.jsonl"
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    client = httpx.Client(transport=httpx.MockTransport(fake_groq))
+    live = GroqLLM(client=client, cache=ResponseCache(cache))
+    s = run_scenario("priya", live, tmp_path / "live", store="simple")
+    assert live.calls > 0 and s["outcome"] == "completed"
+
+    # A fresh process: new ephemeral keys, no Groq key. A replay miss would raise.
+    monkeypatch.setenv("RETRACT_PSEUDONYM_KEY", "other-pseudonym-key")
+    monkeypatch.setenv("RETRACT_SIGNING_KEY", "other-signing-key")
+    monkeypatch.delenv("GROQ_API_KEY")
+    args = ["--scenario", "priya", "--store", "simple", "--llm", "groq", "--replay"]
+    assert main([*args, "--cache", str(cache), "--out", str(tmp_path / "replay")]) == 0
+    replayed = json.loads(capsys.readouterr().out)
+    assert replayed.pop("llm") == {
+        "name": "groq", "calls": 0, "cache_hits": live.calls + live.cache_hits,
+        "replay": True, "model": "openai/gpt-oss-120b",
+    }  # fmt: skip
+    assert replayed == s
+
+    with pytest.raises(SystemExit):
+        main(["--scenario", "priya", "--replay"])  # replay without --llm groq
 
 
 @pytest.mark.integration

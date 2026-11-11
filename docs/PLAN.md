@@ -434,7 +434,7 @@ Never cut: experiments, receipts, recovery, probes.
 - No LangGraph store adapter: the brief's feature 1 is narrowed to orchestration only.
 - Guarantee levels L2/L3 as in the Guarantee levels section.
 - `receipt.export` supports JSON only; the brief shows `export("dpdp")`.
-- One hosted model (Groq Llama 3.3); the brief's second model for generalization is future work.
+- One hosted model (Groq `openai/gpt-oss-120b`; Llama 3.3 was shut down on 08/16/26); the brief's second model for generalization is future work.
 
 ## Implementation decisions (M1–M3)
 
@@ -478,14 +478,21 @@ Never cut: experiments, receipts, recovery, probes.
   - Oracle: the refund facts also match their window ("90 days"/"90-day", "30 days"/"30-day"), because answers may state the window without the policy code.
 - **Logs:** `memory.jsonl` holds ids, tiers and labels only, so it carries no residue. `messages.jsonl` holds content; it is outside Retract's scope, and its hits are reported as `message_log_lines_with_target`.
 - **Keys:** `testbed.run` generates ephemeral keys when they are unset. The data is synthetic, and receipts from such a run verify only inside that process.
-- **Groq:** `retract/derive/groq.py` (httpx; Retry-After and backoff; `TransientError` after retries) with frozen prompts `v1`. First live runs (user's key, Nov 10): `llama-3.3-70b-versatile` returns 404, because Groq shut it down on 08/16/26, so both runs used `--model openai/gpt-oss-120b`. The default model is not changed yet (user decision pending).
+- **Groq:** `retract/derive/groq.py` (httpx; Retry-After and backoff; `TransientError` after retries) with frozen prompts `v1`. First live runs (user's key, Nov 10): `llama-3.3-70b-versatile` returns 404, because Groq shut it down on 08/16/26, so both runs used `--model openai/gpt-oss-120b`. On Nov 12 the user made `openai/gpt-oss-120b` the default (`retract.derive.groq.MODEL`).
   - priya: `completed`, residue 0, contaminated answers 1/20 → 0, 213 calls (rate-limit retries included).
   - poisoned_doc (old question): `completed`, residue 0, 58 records with the false policy → 0, 327 calls. Influenced answers 0/20 before retraction even though the poisoned doc was retrieved in 38 of 40 pre-retraction answer calls: the question let the model abstain. The question was redesigned (above); not yet re-run on Groq.
-  - Groq answers differ between runs (2/20 influenced answers during the tickets vs 0/20 in the re-asked "before" measurement), so experiment results need the response cache. The cache comes with M8.
+  - Groq answers differ between runs (2/20 influenced answers during the tickets vs 0/20 in the re-asked "before" measurement), so experiment results need the response cache (below, Nov 12).
 - **First FakeLLM results (both research stores):**
   - priya: 6 affected records over 3 agents and 4 tiers, outcome `completed`. Contaminated answers go from 1/20 to 0, and residue is 0.
   - poisoned_doc: entered memory once, promoted to support/shared 19, research 19 and planning 20. It influenced 20/20 answers, and the influence is gone after retraction (59 records, `completed`).
   - Runtime: about 12 s with the simple store, and 50–80 s with Mem0.
+
+**Groq response cache (Nov 12; the user may overrule any):**
+- `retract/derive/cache.py`: an append-only JSONL file, `experiments/cache/groq.jsonl` by default, committed. One line per distinct request holds `key`, `model`, `prompt_version`, `date` and `response`. The key is the SHA-256 of the canonical request body (model, temperature, messages) plus the prompt version. Keys and headers are never stored.
+- **Read-through, also when live.** A request already in the cache is never re-sent, so identical requests get identical answers within and across runs. A replay then reproduces the live run exactly. The cost: Groq's run-to-run variance for one request is not sampled; M8 states this.
+- **Replay:** `--llm groq --replay` serves from the cache only. It needs no key, makes no HTTP call, and a miss raises `RetractError` instead of going to the network.
+- **Torn writes:** a crash mid-append can tear only the last line. Loading skips it, and the next append truncates it. A corrupt line anywhere else raises `RetractError`.
+- **Test:** priya runs "live" against a FakeLLM-backed mock of Groq, then replays in a fresh process with new ephemeral keys and no Groq key. The replay makes 0 HTTP calls, every request hits the cache, and the summary is identical. So nothing random per run reaches the prompts.
 
 **M6 decisions (the user may overrule any):**
 - **Entry points:** `retract audit <path>...` (`[project.scripts]`, or `python -m retract.cli audit`). The code is in `retract/audit.py`, stdlib `ast` and `tomllib` only.

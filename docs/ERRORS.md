@@ -163,3 +163,12 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 ### 37. `retract audit nope.py` printed only `retract audit: nope.py`
 - **Cause:** `FileNotFoundError(path)` stringifies to the bare path.
 - **Fix:** the message is now `no such file or directory: <path>` (exit code 2). Findings are also sorted by line, since `ast.walk` yields them breadth-first.
+
+## Groq default model and response cache
+
+### 38. Patch to `retract/derive/cache.py` failed: `AssertionError` on the search text
+- **Cause:** entry 31 again. The patch searched for a newline escape inside a shell-embedded Python script, and the doubled backslash reached Python as a single one, so the search text held a real newline.
+- **Fix:** nothing had been written, because the patch asserts every pair first. The file was rewritten through the editor tool. Entry 31's rule stands: edits with backslashes never go through a heredoc.
+
+### 39. Ruff `E501` in `cache.py` and `I001` in `tests/test_llm.py`
+- **Fix:** `ruff check --fix` sorted the imports, and `ruff format` wrapped the line.

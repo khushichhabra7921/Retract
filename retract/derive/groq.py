@@ -3,6 +3,9 @@
 Retryable failures (timeouts, connection errors, 429, 5xx) are retried with Retry-After or
 exponential backoff and finally raise TransientError, so a retraction fails resumably instead of
 quarantining records. Other HTTP errors raise RetractError.
+
+With a ResponseCache, every request is looked up first and every live response is stored.
+`replay=True` serves from the cache only, needs no key, and raises RetractError on a miss.
 """
 
 from __future__ import annotations
@@ -15,9 +18,10 @@ import httpx
 
 from retract.core.errors import RetractError, TransientError
 from retract.derive import prompts
+from retract.derive.cache import ResponseCache, request_key
 
 URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "llama-3.3-70b-versatile"
+MODEL = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile was shut down on 08/16/26
 
 
 class GroqLLM:
@@ -29,16 +33,23 @@ class GroqLLM:
         max_retries: int = 4,
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        cache: ResponseCache | None = None,
+        replay: bool = False,
     ) -> None:
+        if replay and cache is None:
+            raise RetractError("replay needs a response cache")
         key = os.environ.get("GROQ_API_KEY")
-        if not key:
+        if not key and not replay:
             raise RetractError("GROQ_API_KEY is not set in the process environment")
-        self._headers = {"Authorization": f"Bearer {key}"}
+        self._headers = {"Authorization": f"Bearer {key}"} if key else {}
         self.model = model
         self.max_retries = max_retries
         self.client = client or httpx.Client(timeout=timeout)
         self.sleep = sleep
-        self.calls = 0
+        self.cache = cache
+        self.replay = replay
+        self.calls = 0  # HTTP attempts, retries included
+        self.cache_hits = 0
 
     def summarize(self, texts: Sequence[str]) -> str:
         return self._chat(prompts.SUMMARIZE, "\n".join(f"- {t}" for t in texts))
@@ -53,6 +64,20 @@ class GroqLLM:
             "temperature": 0,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
+        key = request_key(body, prompts.PROMPT_VERSION) if self.cache else ""
+        if self.cache:
+            cached = self.cache.get(key)
+            if cached is not None:
+                self.cache_hits += 1
+                return cached
+            if self.replay:
+                raise RetractError(f"replay: no cached response for this {self.model} request")
+        text = self._post(body)
+        if self.cache:
+            self.cache.put(key, text, model=self.model, prompt_version=prompts.PROMPT_VERSION)
+        return text
+
+    def _post(self, body: dict[str, object]) -> str:
         for attempt in range(self.max_retries + 1):
             last = attempt == self.max_retries
             self.calls += 1
