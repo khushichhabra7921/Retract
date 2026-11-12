@@ -560,6 +560,27 @@ Never cut: experiments, receipts, recovery, probes.
   - At an assumed 700–1,000 tokens per request (prompt plus gpt-oss reasoning), the daily token limit allows about 200–285 requests per day, which is about one seed every 1.5–2 days. The stored `usage` replaces this assumption after the first run.
   - `GROQ_SEED_COUNT = 5` (test seeds 10–14) is a placeholder until the user picks n from the measured token use. RESULTS states n.
 
+**M7 decisions: dashboard and demo (Nov 12; the user may overrule any):**
+- **Code.** `retract/dashboard/` (extra `dashboard`) holds a FastAPI app with server-rendered Jinja2 templates: autoescaped, no JavaScript, no external assets. `create_app(factory)` takes a function that builds the Retract instance.
+- **One worker thread.** Every Retract call runs on one dedicated worker thread. A SQLite connection belongs to the thread that opened it, and one thread also serializes requests, so the core keeps `check_same_thread`.
+- **Views:**
+  - **Records:** status, hold, labels, and content (or "purged").
+  - **Record:** labels with retract links, the derivation function, replaces/replaced-by links, and "Why does the agent know this?". That is the ancestor tree back to the primaries and their owners, with each edge marked `input` or `read`.
+  - **Sources:** the live records each source reaches, and its op state.
+  - **Retract:** preview, then confirm. The preview shows the blast radius, the planned actions and the closure hash. If the closure changed, the confirm re-previews (409) and touches nothing.
+  - **Operations, and an op view:** state and error, a Resume button for an unfinished op, the journal actions, and the receipt. The receipt section shows the outcome, the receipt type, signature, chain and execution checks, and the three verification dimensions separately. Answer contamination is shown as "not measured" (oracle only).
+  - **JSON export** of the receipt.
+- **Blocked retractions.** A retraction that needs records held by an unfinished op redirects to that op with an explanation.
+- **Safety.** Every state change is a POST carrying a per-process CSRF token (`secrets.token_urlsafe`, compared in constant time). A missing or wrong token returns 403. The server binds 127.0.0.1 only.
+- **Demo.** `retract demo` and `make demo` build the Priya world on FakeLLM in a temp directory: three users, a weekly summary, a plan, and a reminder tied to everyone by the step read-set. Then they fail Mei's retraction mid-repair (the LLM goes down) and serve the dashboard. Walkthrough:
+  1. Retracting Priya is blocked by Mei's held records.
+  2. Resume Mei; the op ends `completed`.
+  3. Retract Priya; the op ends `completed` with a retraction receipt.
+  - **Why Mei and not Arjun:** an earlier draft failed Arjun's retraction. That resume ends `contained`, because the reminder about Arjun has no valid input left. Priya's op then inherited the quarantined reminder.
+  - **Repairs drop read-set edges.** A repair rebuilds a record from its declared inputs only. After Mei's repair the reminder no longer carries Priya's label, and Priya's closure shrinks from 5 records to 4.
+- **Tests.** `tests/test_dashboard.py` (TestClient) covers every page, 404s, CSRF rejection on both POSTs, the blocked → resume → stale re-preview → completed flow, and receipt JSON without raw content. The flow was also checked by hand in a browser.
+- **Make and CI.** Every Makefile recipe names its extras (`uv run --extra ...`), so it works from a clean clone; `uv run` only adds packages and never removes any. CI syncs `--extra dashboard` too.
+
 **M6 decisions (the user may overrule any):**
 - **Entry points:** `retract audit <path>...` (`[project.scripts]`, or `python -m retract.cli audit`). The code is in `retract/audit.py`, stdlib `ast` and `tomllib` only.
 - **What is flagged:** a call to `.add/.upsert/.put/.add_texts/.add_documents` on a value bound to a known memory client. On Retract's own adapters, `.write` is flagged too, because it skips lineage and the guard.

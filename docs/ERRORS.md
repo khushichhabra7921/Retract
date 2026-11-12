@@ -224,3 +224,23 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 ### 49. Ruff `I001` in `retract/derive/cache.py`; mypy `assignment` on the cache entry
 - **Cause:** a scripted patch inserted `collections.abc` out of order. The entry dict was inferred as `dict[str, str]`, so `usage` (a dict) could not be added.
 - **Fix:** `ruff check --fix` sorted the imports, and the entry is annotated `dict[str, Any]`.
+
+## M7 (dashboard and demo)
+
+### 50. mypy `call-overload` on `rt.retract(source, mode, dry_run=True)` in the dashboard
+- **Cause:** `mode` arrives as a plain `str`, and the overloads need the `Mode` literal type.
+- **Fix:** handlers check `mode` against `MODES`, and one helper `_plan` casts it to `Mode`, so no `type: ignore` is needed.
+
+### 51. First demo story ended `contained` instead of `completed`
+- **Cause:** a design issue, not a bug. The demo failed Arjun's retraction, and its resume quarantines the reminder about Arjun (no valid explicit input), so the outcome is `contained`. Priya's later retraction then reached the already quarantined reminder and also ended `contained`.
+- **Fix:** the demo fails Mei's retraction instead. Every record in Mei's closure can be rebuilt, so both ops end `completed`.
+
+### 52. Sources page miscounted and mislabeled
+- **Symptom:**
+  - "affected closure" counted retracted history: Arjun showed 10.
+  - A first fix counted only readable records, so records held by a failed op disappeared and Priya showed 2.
+  - A source whose op had failed was labeled "retracted".
+- **Fix:** the page counts the closure records not yet retracted or tombstoned (5 per source in the demo), and the state badge shows the op's real state (failed, executing, or retracted when finalized).
+
+### 53. Ruff `E501` in a dashboard template line
+- **Fix:** wrapped the line. The HTML output is unchanged.

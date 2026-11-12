@@ -90,7 +90,7 @@ def run_groq(
     shared = ResponseCache(cache)
     client = client or httpx.Client(timeout=60.0)
     jobs = [(sc, seed, cfg) for sc in scenarios for seed in seeds for cfg in GROQ_RUNS]
-    rows, http = [], 0
+    rows, http, tokens = [], 0, 0
     for i, (sc, seed, cfg) in enumerate(jobs, start=1):
         llm = GroqLLM(model=model or MODEL, cache=shared, replay=replay, client=client)
         try:
@@ -102,9 +102,11 @@ def run_groq(
             )
             raise
         http += llm.calls
+        tokens += llm.tokens
         print(
             f"[{i}/{len(jobs)}] {sc} seed {seed} {cfg}: {llm.requests} requests,"
-            f" {llm.cache_hits} cached, {llm.calls} HTTP (total HTTP {http})",
+            f" {llm.cache_hits} cached, {llm.calls} HTTP, {llm.tokens} tokens"
+            f" (total HTTP {http}, tokens {tokens})",
             file=sys.stderr,
         )
     check_pairing(rows)
