@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -46,20 +47,30 @@ class ResponseCache:
     def get(self, key: str) -> str | None:
         return self.entries.get(key)
 
-    def put(self, key: str, response: str, *, model: str, prompt_version: str) -> None:
+    def put(
+        self,
+        key: str,
+        response: str,
+        *,
+        model: str,
+        prompt_version: str,
+        usage: Mapping[str, int] | None = None,
+    ) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self._torn_tail:  # drop it, so the file stays valid JSONL
             data = self.path.read_bytes()
             with self.path.open("r+b") as f:
                 f.truncate(data.rfind(b"\n") + 1)
             self._torn_tail = False
-        entry = {
+        entry: dict[str, Any] = {
             "key": key,
             "model": model,
             "prompt_version": prompt_version,
             "date": datetime.now(UTC).date().isoformat(),
             "response": response,
         }
+        if usage:
+            entry["usage"] = dict(usage)
         with self.path.open("a", encoding="utf-8", newline="\n") as f:
             f.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
         self.entries[key] = response

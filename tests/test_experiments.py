@@ -84,3 +84,26 @@ def test_cost_split_is_consistent(monkeypatch):
     assert m["write_us_retract"]["median"] > m["write_us_raw"]["median"] > 0
     assert m["op_s"]["median"] >= m["rederive_s"]["median"] + m["probes_s"]["median"]
     assert m["llm_calls"]["median"] > 0
+
+
+def test_groq_experiment_replays_without_key_or_network(tmp_path, monkeypatch):
+    import httpx
+
+    from experiments.run import run_groq
+    from tests.test_testbed import fake_groq
+
+    monkeypatch.setenv("RETRACT_PSEUDONYM_KEY", "test-pseudonym-key")
+    monkeypatch.setenv("RETRACT_SIGNING_KEY", "test-signing-key")
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    cache = tmp_path / "cache.jsonl"
+    live_client = httpx.Client(transport=httpx.MockTransport(fake_groq))
+    live = run_groq([10], cache, replay=False, client=live_client, scenarios=["priya"])
+    assert {r["config"] for r in live} == {"clean", "naive_delete", "delete", "auto", "quarantine"}
+
+    monkeypatch.delenv("GROQ_API_KEY")
+    offline = httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("network")))
+    replayed = run_groq([10], cache, replay=True, client=offline, scenarios=["priya"])
+    assert replayed == live  # rows are identical live and replayed
+    s = summarize(replayed, "Groq test")
+    assert "auto_leak" not in s["scenarios"]["priya"] and s["llm"] == "Groq test"
+    assert "| auto | 0/1" in markdown(s)

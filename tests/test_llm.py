@@ -115,3 +115,22 @@ def test_cache_drops_a_torn_last_line_and_rejects_corruption(tmp_path):
     path.write_bytes(('{"key": "k2", "resp\n' + good + "\n").encode())
     with pytest.raises(RetractError, match="cache.jsonl:1: corrupt cache entry"):
         ResponseCache(path)
+
+
+def test_long_rate_limit_fails_fast_instead_of_sleeping(monkeypatch):
+    body = {"error": {"code": "rate_limit_exceeded", "message": "Limit 200000 tokens per day"}}
+    daily = httpx.Response(429, headers={"retry-after": "3600"}, json=body)
+    llm, seen, waits = groq(monkeypatch, [daily])
+    with pytest.raises(TransientError, match="retry after 3600 s exceeds max_wait.*tokens per day"):
+        llm.summarize(["a"])
+    assert len(seen) == 1 and waits == []
+
+
+def test_token_usage_is_counted_and_cached(monkeypatch, tmp_path):
+    usage = {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70, "queue_time": 0.1}
+    reply = httpx.Response(200, json={"choices": [{"message": {"content": "x"}}], "usage": usage})
+    llm, _, _ = groq(monkeypatch, [reply], cache=ResponseCache(tmp_path / "c.jsonl"))
+    llm.summarize(["a"])
+    assert llm.tokens == 70
+    entry = json.loads((tmp_path / "c.jsonl").read_text(encoding="utf-8"))
+    assert entry["usage"] == {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70}

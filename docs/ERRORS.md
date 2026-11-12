@@ -218,3 +218,9 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 
 ### 48. mypy: unused `type: ignore` in `experiments/cost.py`
 - **Fix:** removed it. Assigning to `residue.measure` type-checks without one.
+
+## M8c (Groq experiment harness)
+
+### 49. Ruff `I001` in `retract/derive/cache.py`; mypy `assignment` on the cache entry
+- **Cause:** a scripted patch inserted `collections.abc` out of order. The entry dict was inferred as `dict[str, str]`, so `usage` (a dict) could not be added.
+- **Fix:** `ruff check --fix` sorted the imports, and the entry is annotated `dict[str, Any]`.

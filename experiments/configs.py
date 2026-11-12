@@ -31,6 +31,8 @@ RUNS = tuple(c for c in CONFIGS if c != "unretracted")  # unretracted = a run's 
 MODES = {"delete": "delete", "auto": "auto", "quarantine": "quarantine",
          "auto_leak": "auto", "auto_paraphrase": "auto"}  # fmt: skip
 INJECTED = ("auto_leak", "auto_paraphrase")
+GROQ_RUNS = tuple(c for c in RUNS if c not in INJECTED)  # injection needs FakeLLM
+GROQ_SEED_COUNT = 5  # n for the Groq runs: the first test seeds, set by the budget check
 DEV_SEEDS = range(0, 10)  # threshold tuning only
 TEST_SEEDS = range(10, 40)  # every reported result
 # Post-repair similarity threshold, tuned on DEV_SEEDS (experiments/results/tuning.json) and
@@ -136,7 +138,7 @@ def _retract(
     plan = rt.retract(source, mode, dry_run=True)
     closure = {a.record_id: a.action for a in plan.actions}
     before = rt.lineage.records(list(closure))
-    calls0 = getattr(llm, "calls", 0)
+    calls0 = _requests(llm)
     if inject is not None:
         llm.inject = inject  # type: ignore[attr-defined]  # only while repairs run
     try:
@@ -145,7 +147,7 @@ def _retract(
         if inject is not None:
             llm.inject = None  # type: ignore[attr-defined]
     return {
-        "llm_calls": getattr(llm, "calls", 0) - calls0,
+        "llm_calls": _requests(llm) - calls0,
         "outcome": receipt.outcome,
         "receipt_type": receipt.receipt_type,
         "receipt_ok": receipt.verify().ok,
@@ -158,6 +160,11 @@ def _retract(
         ),
         "runtime_check": _runtime_check(rt, list(closure), target, oracle),
     }
+
+
+def _requests(llm: LLM) -> int:
+    """LLM requests made so far: FakeLLM.calls, or GroqLLM.requests (cache hits included)."""
+    return int(getattr(llm, "requests", getattr(llm, "calls", 0)))
 
 
 def _runtime_check(

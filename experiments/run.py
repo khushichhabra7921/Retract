@@ -25,6 +25,8 @@ from typing import Any
 from experiments.configs import (
     CONFIGS,
     DEV_SEEDS,
+    GROQ_RUNS,
+    GROQ_SEED_COUNT,
     INJECTED,
     MODES,
     RUNS,
@@ -34,6 +36,7 @@ from experiments.configs import (
 )
 from experiments.cost import benchmark
 from experiments.stats import bootstrap_ci, clopper_pearson_upper_zero, paired_bootstrap_ci, wilson
+from retract.derive.fakes import FakeLLM
 from testbed.scenarios import SCENARIOS
 
 Row = dict[str, Any]
@@ -64,6 +67,80 @@ def run_all(
         rows = list(pool.map(_job, jobs))
     check_pairing(rows)
     return rows
+
+
+def run_groq(
+    seeds: Sequence[int],
+    cache: Path,
+    replay: bool,
+    model: str | None = None,
+    client: Any = None,  # an httpx.Client; tests pass one with a mock transport
+    scenarios: Sequence[str] = SCENARIOS,
+) -> list[Row]:
+    """Groq trials, serially in this process with one shared response cache: parallel appends
+    would interleave, and through the cache the configs of a seed share one pre-retraction world
+    (the first config pays for it, the rest are cache hits). Rows are identical live and replayed.
+    A crash (e.g. rate limits) loses nothing: rerun the same command and cached requests are free.
+    """
+    import httpx
+
+    from retract.derive.cache import ResponseCache
+    from retract.derive.groq import MODEL, GroqLLM
+
+    shared = ResponseCache(cache)
+    client = client or httpx.Client(timeout=60.0)
+    jobs = [(sc, seed, cfg) for sc in scenarios for seed in seeds for cfg in GROQ_RUNS]
+    rows, http = [], 0
+    for i, (sc, seed, cfg) in enumerate(jobs, start=1):
+        llm = GroqLLM(model=model or MODEL, cache=shared, replay=replay, client=client)
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+                rows.append(run_trial(sc, seed, cfg, Path(d), llm=llm))
+        except Exception:
+            print(
+                f"failed at {sc} seed {seed} {cfg}; rerun to resume from the cache", file=sys.stderr
+            )
+            raise
+        http += llm.calls
+        print(
+            f"[{i}/{len(jobs)}] {sc} seed {seed} {cfg}: {llm.requests} requests,"
+            f" {llm.cache_hits} cached, {llm.calls} HTTP (total HTTP {http})",
+            file=sys.stderr,
+        )
+    check_pairing(rows)
+    return rows
+
+
+class _Counting(FakeLLM):
+    """FakeLLM that records each distinct request, as the Groq response cache would key it."""
+
+    def __init__(self, seen: set[tuple[Any, ...]]) -> None:
+        super().__init__()
+        self.seen = seen
+
+    def summarize(self, texts: Sequence[str]) -> str:
+        self.seen.add(("summarize", tuple(texts)))
+        return super().summarize(texts)
+
+    def answer(self, question: str, contexts: Sequence[str]) -> str:
+        self.seen.add(("answer", question, tuple(contexts)))
+        return super().answer(question, contexts)
+
+
+def estimate(seeds: Sequence[int], scenarios: Sequence[str] = SCENARIOS) -> dict[str, float]:
+    """Distinct LLM requests per seed for the Groq configs, from a FakeLLM dry run. Approximate:
+    Groq's own outputs change later prompts, but not how many requests the pipeline makes."""
+    out = {}
+    for sc in scenarios:
+        counts = []
+        for seed in seeds:
+            seen: set[tuple[Any, ...]] = set()
+            for cfg in GROQ_RUNS:
+                with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+                    run_trial(sc, seed, cfg, Path(d), llm=_Counting(seen))
+            counts.append(len(seen))
+        out[sc] = sum(counts) / len(counts)
+    return out
 
 
 def check_pairing(rows: list[Row]) -> None:
@@ -116,12 +193,19 @@ FLAGS: dict[str, Callable[[Row], bool]] = {
 }
 
 
-def summarize(rows: list[Row]) -> dict[str, Any]:
+def summarize(rows: list[Row], llm: str = "FakeLLM") -> dict[str, Any]:
     scenarios = sorted({r["scenario"] for r in rows})
-    summary: dict[str, Any] = {"n_seeds": len({r["seed"] for r in rows}), "scenarios": {}}
+    ran = {r["config"] for r in rows}
+    configs = [c for c in CONFIGS if c in ran or (c == "unretracted" and "auto" in ran)]
+    summary: dict[str, Any] = {
+        "llm": llm,
+        "n_seeds": len({r["seed"] for r in rows}),
+        "seeds": sorted({r["seed"] for r in rows}),
+        "scenarios": {},
+    }
     for sc in scenarios:
         per: dict[str, Any] = {}
-        for cfg in CONFIGS:
+        for cfg in configs:
             st = states(rows, sc, cfg)
             ms = [m for m, _ in st]
             entry: dict[str, Any] = {
@@ -262,7 +346,7 @@ def _paired(rows: list[Row], scenario: str) -> dict[str, Any]:
 def markdown(summary: dict[str, Any]) -> str:
     n = summary["n_seeds"]
     lines = [
-        f"# M8 results (FakeLLM, {n} paired seeds)",
+        f"# M8 results ({summary.get('llm', 'FakeLLM')}, {n} paired seeds: {summary['seeds']})",
         "",
         "Binary columns: trials with the event, k/n, with a two-sided 95% Wilson interval.",
         "Continuous columns: mean over trials, with a 95% trial-level bootstrap interval.",
@@ -274,7 +358,7 @@ def markdown(summary: dict[str, Any]) -> str:
                   " | utility | record preservation | honest-fact retention | over-retraction"
                   " | short guarded reads |",
                   "|---|---|---|---|---|---|---|---|---|"]  # fmt: skip
-        for cfg in CONFIGS:
+        for cfg in (c for c in CONFIGS if c in per):
             e = per[cfg]
             lines.append(
                 f"| {cfg} | {_b(e['structural_residue'])} | {_b(e['guarded_retrieval_residue'])}"
@@ -285,7 +369,7 @@ def markdown(summary: dict[str, Any]) -> str:
         lines += ["", f"Runtime post-repair check vs the oracle ({sc}, replacements per config):",
                   "", "| config | TP | FP | FN | TN | trials with FN | trials with FP | FN rate"
                   " | outcomes |", "|---|---|---|---|---|---|---|---|---|"]  # fmt: skip
-        for cfg in ("auto", *INJECTED):
+        for cfg in (c for c in ("auto", *INJECTED) if c in per):
             rc = per[cfg]["runtime_check"]
             n = rc["replacements"]
             lines.append(
@@ -311,15 +395,33 @@ def _c(e: dict[str, Any] | None) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m experiments.run")
-    ap.add_argument("--seeds", type=int, default=len(TEST_SEEDS), help="first N test seeds")
+    ap.add_argument("--llm", choices=("fake", "groq"), default="fake")
+    ap.add_argument("--seeds", type=int, help="first N test seeds (default: 30, Groq: 5)")
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1)
-    ap.add_argument("--out", type=Path, default=Path("experiments/results/fake"))
+    ap.add_argument("--out", type=Path, help="default: experiments/results/<llm>")
     ap.add_argument("--tune", action="store_true", help="sweep the threshold on dev seeds")
     ap.add_argument("--cost-seeds", type=int, default=5, help="serial cost benchmark; 0 skips")
+    ap.add_argument("--replay", action="store_true", help="Groq: cache only, no key, no network")
+    ap.add_argument("--cache", type=Path, default=Path("experiments/cache/groq.jsonl"))
+    ap.add_argument("--model", help="Groq model id (default: retract.derive.groq.MODEL)")
+    ap.add_argument("--estimate", action="store_true", help="distinct Groq requests per seed")
     args = ap.parse_args(argv)
+    groq = args.llm == "groq"
+    if args.replay and not groq:
+        ap.error("--replay needs --llm groq")
+    args.out = args.out or Path("experiments/results") / args.llm
+    args.seeds = args.seeds or (GROQ_SEED_COUNT if groq else len(TEST_SEEDS))
     for var in ("RETRACT_PSEUDONYM_KEY", "RETRACT_SIGNING_KEY"):
         if not os.environ.get(var):  # synthetic data; worker processes inherit the key
             os.environ[var] = secrets.token_hex(32)
+    if args.estimate:
+        per_seed = estimate(TEST_SEEDS[:2])
+        for sc, n in per_seed.items():
+            print(f"{sc}: ~{n:.0f} distinct requests per seed")
+        total = sum(per_seed.values())
+        for n in sorted({1, GROQ_SEED_COUNT, 10, 30}):
+            print(f"{n} seeds, both scenarios: ~{n * total:.0f} Groq requests (+ retries)")
+        return 0
     if args.tune:
         configs = ("auto", *INJECTED)
         result = tuning(run_all(DEV_SEEDS, args.workers, configs, TUNING_GRID))
@@ -332,8 +434,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not 0 < args.seeds <= len(TEST_SEEDS):
         ap.error(f"--seeds must be 1..{len(TEST_SEEDS)}")
-    rows = run_all(TEST_SEEDS[: args.seeds], args.workers)
-    summary = summarize(rows)
+    seeds = TEST_SEEDS[: args.seeds]
+    if groq:
+        from retract.derive.groq import MODEL
+        from retract.derive.prompts import PROMPT_VERSION
+
+        rows = run_groq(seeds, args.cache, args.replay, args.model)
+        label = f"Groq {args.model or MODEL}, cached responses, prompts {PROMPT_VERSION}"
+        summary = summarize(rows, label)
+    else:
+        summary = summarize(rows := run_all(seeds, args.workers))
     args.out.mkdir(parents=True, exist_ok=True)
     with (args.out / "trials.jsonl").open("w", encoding="utf-8", newline="\n") as f:
         for r in sorted(rows, key=lambda r: (r["scenario"], r["seed"], r["config"])):
@@ -342,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
     md = markdown(summary)
     (args.out / "summary.md").write_bytes((md + "\n").encode())
     print(md)
-    if args.cost_seeds:  # after the pool has exited, so nothing competes for the CPU
+    if args.cost_seeds and not groq:  # after the pool has exited: nothing competes for the CPU
         result = benchmark(TEST_SEEDS[: args.cost_seeds], SCENARIOS)
         (args.out / "cost.json").write_bytes((json.dumps(result, indent=2) + "\n").encode())
         cost = cost_markdown(result)

@@ -333,7 +333,7 @@ tests/  docs/ (retract-project-brief.md, PLAN.md, RESULTS.md)
   - ✅ Retract: structural pass and guarded retrieval residue 0 on the slice
   - ✅ planted paraphrase miss measured as FN
   - ✅ `crash_after_purge_before_probes`: blocking persists, no duplicate writes, `retrieval_residue = not_run`
-- **Groq budget:** compute calls per trial × configs × seeds × scenarios against current Groq rate limits. If over budget, reduce the Groq seeds and state n.
+- **Groq budget:** compute calls per trial × configs × seeds × scenarios against current Groq rate limits. If over budget, reduce the Groq seeds and state n. Done Nov 12 (M8c decisions): about 414 requests per seed.
 - **Checkpoint Nov 22:** M3 done. If missed, cut M6 (audit) and the Groq runs first.
 
 ### Week 3 · Nov 23–29
@@ -546,6 +546,19 @@ Never cut: experiments, receipts, recovery, probes.
   - **Negative result: paraphrases are never caught.** FN on every replacement (1605 and 92), at every threshold of the sweep. The op still ends `completed`, and the receipt reports retrieval residue `pass`, because the probes use the same heuristic. Meanwhile the oracle finds structural residue in 30/30 trials and 100% contaminated answers on poisoned_doc. So FakeEmbedder's hashed bag-of-words cannot support a claim about paraphrased leaks, and a semantic embedder is future work.
   - **Over-fetch shortfall:** quarantine leaves 43.6% of guarded reads short on poisoned_doc ([37.1%, 49.8%]), because 54 quarantined records crowd the tiers past the k×4 over-fetch. auto, delete and clean have none, and utility is unchanged on FakeLLM.
   - **Cost (medians):** a Retract write takes 7.4–7.9 ms vs 0.13–0.15 ms for a raw adapter write, about 55×, mostly durable SQLite commits on the crash-safe write path. A guarded read is about 1.9× a raw read (1.2 ms vs 0.63 ms). The auto op takes 0.31 s on priya (closure 5) and 1.94 s on poisoned_doc (closure 54), where journal, BLOCK, purge and structural checks dominate (1.91 s) and probes take 0.06 s. Re-derivation is about 0 s on FakeLLM; a hosted LLM adds its latency to each of the 4 or 54 calls.
+
+**M8c decisions: Groq experiment harness (Nov 12; the user may overrule any):**
+- **Command.** `python -m experiments.run --llm groq [--seeds N] [--replay]`, also available as `make experiments-groq` and `make experiments-groq-replay`. Results go to `experiments/results/groq/`, and responses to `experiments/cache/groq.jsonl`.
+- **Configs.** clean, naive_delete, delete, auto and quarantine (unretracted comes from auto's before state). The injection configs stay FakeLLM-only.
+- **Serial.** Groq trials run serially in one process with one shared `ResponseCache`. Parallel processes would interleave appends to the JSONL file, and rate limits leave nothing to gain from parallelism.
+- **Shared worlds.** The cache is read-through, so the configs of a seed share one pre-retraction world. The first config pays the Groq calls and the rest are cache hits, so `check_pairing` holds by construction. Replay rows are identical to the live rows (tested offline with a FakeLLM-backed mock of Groq).
+- **Resumable.** A crash or a rate limit loses nothing: rerunning the same command serves every finished request from the cache. A `Retry-After` longer than `max_wait` (120 s), such as a daily limit, raises `TransientError` instead of sleeping for hours, and the message includes Groq's own error.
+- **Tokens.** Each cache entry stores Groq's `usage` (prompt, completion and total tokens), and the runner prints running request, cache-hit, HTTP and token counts.
+- **Budget (the Week 2 check, done Nov 12):**
+  - `--estimate` (a FakeLLM dry run on 2 test seeds) counts about 120 distinct requests per seed for priya and 294 for poisoned_doc, so about 414 per seed for both scenarios.
+  - Groq's free plan for `openai/gpt-oss-120b` allows 30 requests/min, 1K requests/day, 8K tokens/min and 200K tokens/day (console.groq.com/docs/rate-limits, Nov 12). The account's own limits page is authoritative.
+  - At an assumed 700–1,000 tokens per request (prompt plus gpt-oss reasoning), the daily token limit allows about 200–285 requests per day, which is about one seed every 1.5–2 days. The stored `usage` replaces this assumption after the first run.
+  - `GROQ_SEED_COUNT = 5` (test seeds 10–14) is a placeholder until the user picks n from the measured token use. RESULTS states n.
 
 **M6 decisions (the user may overrule any):**
 - **Entry points:** `retract audit <path>...` (`[project.scripts]`, or `python -m retract.cli audit`). The code is in `retract/audit.py`, stdlib `ast` and `tomllib` only.
