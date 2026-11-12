@@ -1,8 +1,8 @@
 # Retract: source-level retraction across multi-agent memory — results
 
 Draft, Nov 12 2026. Structured as a paper skeleton. Every number below comes from a committed result
-file under `experiments/results/`, and each section names the file. The Groq results are pending
-(section 6.8).
+file under `experiments/results/`, and each section names the file. Hosted-LLM results (Groq,
+n = 1 seed) are in section 6.8.
 
 ## Abstract
 
@@ -369,19 +369,47 @@ Each cell counts replacements: the oracle's verdict vs the runtime check's.
   latency for each of the 4 or 54 calls.
 - **Machine:** one Windows 11 laptop, Python 3.12.
 
-### 6.8 Hosted LLM (Groq `openai/gpt-oss-120b`) — pending
+### 6.8 Hosted LLM (Groq `openai/gpt-oss-120b`, n = 1; `experiments/results/groq/`)
 
-The Groq run is in progress. It covers clean, naive_delete, delete, auto and quarantine on the
-first test seeds, with frozen prompts (`v1`) and every response cached in
-`experiments/cache/groq.jsonl`; `make experiments-groq-replay` reproduces it without a key. This
-section will report n, the same metrics as 6.1–6.3, and the closure over-approximation.
-Over-approximation can be non-zero here, because a real summarizer may drop facts that lineage
-still attributes to the source.
+**Setup.** Test seed 10 only, with clean, naive_delete, delete, auto and quarantine. The injection
+configs are FakeLLM-only. Prompts are frozen (`v1`), temperature is 0, and all 423 responses are
+cached in `experiments/cache/groq.jsonl` (233,946 tokens in total, 553 per request on average).
+`make experiments-groq-replay` reproduced every result file byte for byte, with no key and no HTTP
+calls.
 
-**Budget.** `--estimate` counts about 414 distinct requests per seed. The first live requests
-averaged 532 tokens (256 prompt, 276 completion), so one seed takes about 220K tokens. Groq's free
-plan allows 200K tokens per day for this model, so n is limited by the token budget and will be
-stated.
+**n = 1 is an illustration, not an estimate.** With one trial per cell, a binary outcome of 0/1 has
+a Wilson 95% interval of [0.000, 0.793]. The table shows what happened on one seed; it does not give
+rates. n was set by Groq's free-plan budget (200K tokens per day): one seed spanned two daily
+windows.
+
+| poisoned_doc, seed 10 | contaminated answers | useful answers (true policy RP-30) | readable records | honest mentions |
+|---|---|---|---|---|
+| clean | 0/20 | 20/20 | 129 | 279 |
+| unretracted | 20/20 | 1/20 | 130 | 227 |
+| naive_delete | 20/20 | 1/20 | 129 | 227 |
+| delete | 0/20 | 20/20 | 78 | 36 |
+| auto | 0/20 | 20/20 | 129 | 227 |
+| quarantine | 0/20 | 20/20 | 78 | 36 |
+
+- **Utility now separates the configs.** FakeLLM's extractive answers quoted both policies, so
+  utility was 1.000 everywhere (6.1). The hosted model answers the question: with the false policy
+  in memory, 20/20 answers grant the refund and only 1/20 cites RP-30. Naive deletion changes
+  nothing. Every Retract mode restores 20/20 correct answers.
+- **The four stages hold on a real model.** The false policy entered memory once, was promoted into
+  51 derived records, influenced 20/20 answers, and was gone after retraction.
+- **The same trade-offs as FakeLLM:** zero structural and guarded retrieval residue for every mode;
+  auto kept 99.2% of records and all honest mentions; delete and quarantine kept 60.0% of records
+  and 15.9% of honest mentions; quarantine left 60% of guarded reads short.
+- **The runtime check released every replacement correctly:** TN 51 on poisoned_doc and TN 3 on
+  priya, with no false positives. No injection was run.
+- **Re-derivation vs clean:** the gap is −52 honest mentions on poisoned_doc, close to FakeLLM's
+  −54.5. On priya, auto had **5 more** honest mentions than clean (282 vs 277), because hosted
+  summaries differ in what they repeat. One seed cannot tell whether that is systematic.
+- **Closure over-approximation was still 0.** We expected a real summarizer to drop facts that
+  lineage still attributes to the source. With the `v1` prompt ("keep every distinct fact"), every
+  record in the closure still contained the target fact. A prompt that compresses harder may differ.
+- **priya** matches FakeLLM: 1/20 contaminated answers before retraction (Priya's own question) and
+  0/20 after, with utility 19/19 throughout (Priya's own question is not scored).
 
 ## 7. Negative results and limitations
 
@@ -408,7 +436,8 @@ stated.
 - **FakeLLM:**
   - It concatenates when it summarizes, so every derived record keeps every input fact. Residue
     propagation is therefore maximal, closure over-approximation is zero, and utility cannot
-    separate the configs. The pending Groq results address this only partly (one model, small n).
+    separate the configs. The Groq run (6.8) shows utility separating the configs on poisoned_doc,
+    but it is one model on one seed.
 - **Synthetic data:** the facts and the oracle (unique code-word markers) are synthetic, and the
   oracle detects paraphrases only because they keep the marker.
 - **One testbed topology:** three sequential agents, one store per tier. Mem0 is exercised in

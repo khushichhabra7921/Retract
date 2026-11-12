@@ -141,7 +141,7 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 
 ### 32. poisoned_doc on Groq: 0 influenced answers before retraction
 - **Cause:** a measurement design issue, not a Retract bug. "What is the refund window for {name}'s purchase?" let `gpt-oss-120b` reply "No relevant information" (17/20), because the policy is not about that customer. The poisoned doc was in context in 38 of 40 pre-retraction answer calls. FakeLLM's word-overlap answers had hidden this (20/20).
-- **Fix:** the question is now "{name} bought from us 60 days ago. Can {name} still get a refund?", so the policy decides the answer. The oracle also counts the stated window ("90 days"/"90-day") as the false fact. FakeLLM still shows 20/20 → 0. The Groq re-run is pending.
+- **Fix:** the question is now "{name} bought from us 60 days ago. Can {name} still get a refund?", so the policy decides the answer. The oracle also counts the stated window ("90 days"/"90-day") as the false fact. FakeLLM still shows 20/20 → 0. Superseded on Nov 12 by the M8c Groq experiment on test seed 10: with the redesigned question, 20/20 answers were influenced before retraction and 0/20 after (RESULTS §6.8).
 
 ## M6 (`retract audit`)
 

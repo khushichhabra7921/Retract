@@ -32,7 +32,7 @@ MODES = {"delete": "delete", "auto": "auto", "quarantine": "quarantine",
          "auto_leak": "auto", "auto_paraphrase": "auto"}  # fmt: skip
 INJECTED = ("auto_leak", "auto_paraphrase")
 GROQ_RUNS = tuple(c for c in RUNS if c not in INJECTED)  # injection needs FakeLLM
-GROQ_SEED_COUNT = 5  # n for the Groq runs: the first test seeds, set by the budget check
+GROQ_SEED_COUNT = 1  # n for the Groq runs: ~234K tokens per seed vs a 200K/day free-plan limit
 DEV_SEEDS = range(0, 10)  # threshold tuning only
 TEST_SEEDS = range(10, 40)  # every reported result
 # Post-repair similarity threshold, tuned on DEV_SEEDS (experiments/results/tuning.json) and

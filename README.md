@@ -126,7 +126,7 @@ FakeLLM, 30 paired test seeds, two scenarios. Details, intervals and methods are
   - a Retract write is about 55× a raw adapter write (durable SQLite commits);
   - a guarded read is about 1.9× a raw read;
   - a 54-record retraction takes 1.9 s plus LLM latency.
-- **Hosted LLM** (Groq `openai/gpt-oss-120b`): in progress.
+- **Hosted LLM** (Groq `openai/gpt-oss-120b`, 1 seed, so illustrative only): with the false policy in memory, 20/20 answers were wrong. Naive delete changed nothing, and every Retract mode restored 20/20 correct answers ([results](docs/RESULTS.md#68-hosted-llm-groq-openaigpt-oss-120b-n--1-experimentsresultsgroq)).
 
 ## Limits
 

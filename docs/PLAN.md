@@ -558,7 +558,7 @@ Never cut: experiments, receipts, recovery, probes.
   - `--estimate` (a FakeLLM dry run on 2 test seeds) counts about 120 distinct requests per seed for priya and 294 for poisoned_doc, so about 414 per seed for both scenarios.
   - Groq's free plan for `openai/gpt-oss-120b` allows 30 requests/min, 1K requests/day, 8K tokens/min and 200K tokens/day (console.groq.com/docs/rate-limits, Nov 12). The account's own limits page is authoritative.
   - At an assumed 700–1,000 tokens per request (prompt plus gpt-oss reasoning), the daily token limit allows about 200–285 requests per day, which is about one seed every 1.5–2 days. The stored `usage` replaces this assumption after the first run.
-  - `GROQ_SEED_COUNT = 5` (test seeds 10–14) is a placeholder until the user picks n from the measured token use. RESULTS states n.
+  - **n = 1** (test seed 10; user decision Nov 12). The measured cost was 423 requests and 233,946 tokens (553 per request), more than one free-plan day. `GROQ_SEED_COUNT = 1`. RESULTS §6.8 states n and treats the run as illustrative.
 
 **M7 decisions: dashboard and demo (Nov 12; the user may overrule any):**
 - **Code.** `retract/dashboard/` (extra `dashboard`) holds a FastAPI app with server-rendered Jinja2 templates: autoescaped, no JavaScript, no external assets. `create_app(factory)` takes a function that builds the Retract instance.
