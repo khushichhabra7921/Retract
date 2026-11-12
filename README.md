@@ -1,6 +1,6 @@
 # Retract
 
-Open-source Python SDK that records what agents derive from what. When a source must go, `retract(source)` finds every derived record across agents, tiers and stores, blocks them from reads, repairs them (delete / re-derive / quarantine) and issues a receipt with residue checks.
+Python SDK that records what agents derive from what. When a source must go, `retract(source)` finds every derived record across agents, tiers and stores, blocks them from reads, repairs them (delete / re-derive / quarantine) and issues a receipt with residue checks.
 
 **Status:** pre-alpha research prototype (Nov–Dec 2026). The tests and the experiments in [docs/RESULTS.md](docs/RESULTS.md) are the only validation; there are no users yet. Design and decisions: [docs/PLAN.md](docs/PLAN.md).
 
@@ -205,4 +205,4 @@ Retract reads keys only from the process environment. Nothing parses a `.env` fi
 
 ## License
 
-[Apache-2.0](LICENSE)
+Proprietary. All rights reserved. See [LICENSE](LICENSE).

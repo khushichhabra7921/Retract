@@ -35,7 +35,7 @@ This is a solo, part-time build from 9 Nov to 6 Dec 2026.
 
 ## Decisions taken
 - **Repo:** `C:\Users\hp\OneDrive\Desktop\Retract` (user decision: all work stays in this folder). Known risk: OneDrive syncing `.venv`, SQLite files and `.git` can cause file locks or slow installs; if that happens, pause OneDrive sync rather than move the repo. The brief is copied to `docs/` and is never edited. Local git commits; no push until the user says so.
-- **License:** Apache-2.0.
+- **License:** proprietary, all rights reserved (user decision Nov 12; was Apache-2.0). The repo stays private. `pyproject.toml` carries `Private :: Do Not Upload`, so PyPI rejects an accidental upload.
 - **uv:** installed via `pip install --user uv`. The uv PATH step is documented in the README.
 - **make:** the user runs `choco install make` once.
 - **Groq:** a key is available.

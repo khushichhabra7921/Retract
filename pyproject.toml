@@ -3,8 +3,10 @@ name = "retract"
 version = "0.0.1"
 description = "Source-level retraction for multi-agent memory: lineage, guarded reads, repair and receipts."
 readme = "README.md"
-license = "Apache-2.0"
+license = "LicenseRef-Proprietary"
 license-files = ["LICENSE"]
+# PyPI rejects any upload carrying this classifier: a guard against accidental publishing.
+classifiers = ["Private :: Do Not Upload"]
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2"]
 

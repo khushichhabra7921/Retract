@@ -8,7 +8,7 @@ file under `experiments/results/`, and each section names the file. The Groq res
 
 Multi-agent systems copy what they learn into many memories: private notes, shared briefs, plans and
 summaries, often in different stores. Deleting a user's records, or a document later found to be
-false, removes the originals but leaves every derived copy in place. We built Retract, an open-source
+false, removes the originals but leaves every derived copy in place. We built Retract, a
 Python SDK that records which records were derived from which (lineage). From that, `retract(source)`
 finds every affected record across agents, tiers and stores and blocks it from reads. It then
 repairs each one: delete it, re-derive it from the inputs that remain, or quarantine it. Finally it
@@ -66,8 +66,21 @@ leaves:
 - auditable receipts,
 - residue verification.
 
-A detailed comparison against the full methods of [4] and [25] has not been written yet (the
-optional `docs/RELATED_WORK.md` from the plan).
+Both build derivation graphs over agent memory, but each works within a single agent and a single
+store:
+
+- [4] removes dependent artifacts, using reference counting and a retrieval blocklist, and also
+  unlearns model parameters.
+- [25] starts from diagnosed faulty memories and selectively replays affected steps to recover a
+  failed task.
+
+Retract starts from a source and works across agents and stores. It adds the operational protocol
+(guarded reads, a BLOCK transaction, holds, journaled resume) and signed receipts with separate
+verification dimensions.
+
+[25] also reports a finding that parallels ours: selective replay leaves more recurrence than
+broader recomputation. The full comparison is in [docs/RELATED_WORK.md](RELATED_WORK.md). We have
+not compared the methods empirically.
 
 ## 3. System
 
