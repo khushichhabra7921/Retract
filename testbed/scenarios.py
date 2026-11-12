@@ -17,7 +17,7 @@ from retract import Retract, src
 from retract.adapters.simple import SimpleVectorStore
 from retract.core.interfaces import MemoryAdapter
 from testbed.agents import LLM, RESEARCH, TIERS, Logs, Testbed
-from testbed.data import PERSONAS, POISONED_DOC, facts_in, owned_by
+from testbed.data import ORACLE, PERSONAS, POISONED_DOC, Oracle
 
 SCENARIOS = ("priya", "poisoned_doc")
 READABLE = "status = 'active' AND hold_op_id IS NULL"
@@ -34,33 +34,37 @@ def make_stores(out: Path, store: str) -> dict[str, MemoryAdapter]:
     return stores
 
 
-def run_scenario(name: str, llm: LLM, out: Path, store: str = "mem0") -> dict[str, Any]:
+def setup(name: str, oracle: Oracle = ORACLE) -> tuple[list[str], set[str], str]:
+    """(one question per persona in PERSONAS order, target fact ids, source to retract)."""
     if name not in SCENARIOS:
         raise ValueError(f"scenario must be one of {SCENARIOS}")
+    if name == "priya":
+        questions = [f"What do we know about {n}?" for _, n in PERSONAS]
+        return questions, oracle.owned_by("u_priya"), src.user("u_priya")
+    # The policy decides the answer (RP-30: no, RP-90: yes), so a model cannot abstain
+    # as "not about this customer".
+    questions = [
+        f"{n} bought from us 60 days ago. Can {n} still get a refund?" for _, n in PERSONAS
+    ]
+    return questions, {"refund-false"}, src.doc(POISONED_DOC)
+
+
+def run_scenario(name: str, llm: LLM, out: Path, store: str = "mem0") -> dict[str, Any]:
+    questions, target, source = setup(name)
     out.mkdir(parents=True, exist_ok=True)
     stores = make_stores(out, store)
     rt = Retract(out / "lineage.db", stores=stores)
     try:
         tb = Testbed(rt, llm, Logs(out))
         tb.ingest()
-        if name == "priya":
-            questions = [f"What do we know about {n}?" for _, n in PERSONAS]
-            target, source = owned_by("u_priya"), src.user("u_priya")
-        else:
-            # The policy decides the answer (RP-30: no, RP-90: yes), so a model cannot abstain
-            # as "not about this customer".
-            questions = [
-                f"{n} bought from us 60 days ago. Can {n} still get a refund?" for _, n in PERSONAS
-            ]
-            target, source = {"refund-false"}, src.doc(POISONED_DOC)
         for (persona, n), q in zip(PERSONAS, questions, strict=True):
             tb.run(persona, n, q)
 
-        stages = _spread(rt, target) if name == "poisoned_doc" else None
-        before = _exposure(rt, tb, questions, target)
+        stages = spread(rt, target) if name == "poisoned_doc" else None
+        before = exposure(rt, tb, questions, target)
         plan = rt.retract(source, dry_run=True)
         receipt = plan.execute()
-        after = _exposure(rt, tb, questions, target)
+        after = exposure(rt, tb, questions, target)
         summary: dict[str, Any] = {
             "scenario": name,
             "research_store": store,
@@ -72,7 +76,7 @@ def run_scenario(name: str, llm: LLM, out: Path, store: str = "mem0") -> dict[st
             "verification": receipt.body["verification"],
             "before": before,
             "after": after,
-            "message_log_lines_with_target": _log_hits(out / "messages.jsonl", target),
+            "message_log_lines_with_target": log_hits(out / "messages.jsonl", target),
         }
         if stages is not None:
             summary["stages"] = {
@@ -93,13 +97,13 @@ def run_scenario(name: str, llm: LLM, out: Path, store: str = "mem0") -> dict[st
                 s.close()
 
 
-def _spread(rt: Retract, target: set[str]) -> dict[str, Any]:
+def spread(rt: Retract, target: set[str], oracle: Oracle = ORACLE) -> dict[str, Any]:
     """Stages 1-2: where the target fact sits in memory before retraction."""
     rows = rt.lineage.conn.execute(
         f"SELECT r.agent, r.tier, r.content, EXISTS (SELECT 1 FROM edges e"
         f" WHERE e.child_id = r.record_id) AS derived FROM records r WHERE {READABLE}"
     ).fetchall()
-    hits = [r for r in rows if facts_in(r["content"] or "") & target]
+    hits = [r for r in rows if oracle.facts_in(r["content"] or "") & target]
     promoted = Counter(f"{r['agent']}/{r['tier']}" for r in hits if r["derived"])
     return {
         "entered_memory": sum(1 for r in hits if not r["derived"]),
@@ -107,8 +111,17 @@ def _spread(rt: Retract, target: set[str]) -> dict[str, Any]:
     }
 
 
-def _exposure(rt: Retract, tb: Testbed, questions: list[str], target: set[str]) -> dict[str, Any]:
-    answers = [tb.answer(q) for q in questions]
+def exposure(
+    rt: Retract,
+    tb: Testbed,
+    questions: list[str],
+    target: set[str],
+    oracle: Oracle = ORACLE,
+    answers: list[str] | None = None,
+) -> dict[str, Any]:
+    facts_in = oracle.facts_in
+    if answers is None:
+        answers = [tb.answer(q) for q in questions]
     readable = rt.lineage.conn.execute(f"SELECT content FROM records WHERE {READABLE}")
     raw = Counter()
     for store in rt.stores.values():
@@ -131,9 +144,9 @@ def _exposure(rt: Retract, tb: Testbed, questions: list[str], target: set[str]) 
     }
 
 
-def _log_hits(path: Path, target: set[str]) -> int:
+def log_hits(path: Path, target: set[str], oracle: Oracle = ORACLE) -> int:
     """Message-channel residue: outside Retract's scope, reported, never purged."""
     if not path.exists():
         return 0
     lines = path.read_text(encoding="utf-8").splitlines()
-    return sum(1 for line in lines if facts_in(json.loads(line)["content"]) & target)
+    return sum(1 for line in lines if oracle.facts_in(json.loads(line)["content"]) & target)

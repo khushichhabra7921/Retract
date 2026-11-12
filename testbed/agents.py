@@ -17,7 +17,7 @@ from typing import Annotated, Any, Protocol, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from retract import Record, Retract
-from testbed.data import ALL_FACTS
+from testbed.data import ALL_FACTS, Fact
 
 SUPPORT, RESEARCH, PLANNING = "private:support", "private:research", "private:planning"
 SHARED, KB = "shared", "kb"
@@ -60,8 +60,10 @@ def _append(path: Path, row: dict[str, Any]) -> None:
 
 
 class Testbed:
-    def __init__(self, rt: Retract, llm: LLM, logs: Logs) -> None:
-        self.rt, self.llm, self.logs = rt, llm, logs
+    def __init__(
+        self, rt: Retract, llm: LLM, logs: Logs, facts: Sequence[Fact] = ALL_FACTS
+    ) -> None:
+        self.rt, self.llm, self.logs, self.facts = rt, llm, logs, facts
 
         def derive(op: str, agent: str, tier: str, prefix: str) -> Callable[..., Record]:
             return rt.derives(op, agent=agent, tier=tier)(
@@ -83,7 +85,7 @@ class Testbed:
 
     def ingest(self) -> None:
         """Customer facts into support's memory; docs into the shared knowledge base."""
-        for f in ALL_FACTS:
+        for f in self.facts:
             agent, tier = ("support", SUPPORT) if f.kind == "user" else ("kb", KB)
             self.logs.memory(agent, "write", [
                 self.rt.add(f.text, agent=agent, tier=tier, sources=[f.source])

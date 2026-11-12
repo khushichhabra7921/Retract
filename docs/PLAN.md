@@ -494,6 +494,39 @@ Never cut: experiments, receipts, recovery, probes.
 - **Torn writes:** a crash mid-append can tear only the last line. Loading skips it, and the next append truncates it. A corrupt line anywhere else raises `RetractError`.
 - **Test:** priya runs "live" against a FakeLLM-backed mock of Groq, then replays in a fresh process with new ephemeral keys and no Groq key. The replay makes 0 HTTP calls, every request hits the cache, and the summary is identical. So nothing random per run reaches the prompts.
 
+**M8a decisions: FakeLLM experiment harness (Nov 12; the user may overrule any):**
+- **Scope.** M8a covers `experiments/` (`stats.py`, `configs.py`, `run.py`), `make experiments`, and committed results in `experiments/results/fake/`. Still open for M8b: leak and paraphrase injection (runtime-check FN/FP), the cost split, over-fetch impact and Groq configs. RESULTS.md and the README follow after that.
+- **Seeds.** `testbed.data.dataset(seed)` regenerates the code words and templates of the 17 seeded personas and 28 KB docs. Fact ids, the 3 hand-written users and both refund docs stay fixed, and `dataset(2026)` equals the M5 data. A trial seed also shuffles the ticket order. Seeds are 1–30, and every config of a seed is paired on the same data, order and questions. The Oracle class gives each seed's fact oracle.
+- **Configs.** Each (scenario, seed) gets 5 runs:
+  - `clean`: the target source is never ingested.
+  - `naive_delete`: the source's primary items are deleted from their stores directly.
+  - `delete`, `auto` and `quarantine`: `rt.retract` with that mode.
+  - `unretracted` is the auto run's pre-retraction state. `check_pairing` fails the run unless all four retraction runs of a seed saw an identical pre-retraction state, which also proves determinism across processes.
+- **Metrics (per trial, from the oracle):**
+  - **Structural residue:** physical items, not quarantined, carrying a target fact.
+  - **Readable residue:** lineage-readable records carrying one.
+  - **Retrieval residue:** each target fact's text and both paraphrases are run as probes over every tier with k=5. A probe counts as a hit per group: guarded search, raw unquarantined or raw quarantined.
+  - **Answer contamination:** the share of the 20 answers that contain a target fact.
+  - **Utility:** the share of scored answers containing an expected fact. For priya, that is the persona's own facts, with Priya's own question excluded; for poisoned_doc, it is the true policy RP-30.
+  - **Record preservation:** readable records after / before, where "readable" also requires the item to be in its store, because a naive delete skips lineage.
+  - **Honest-fact retention:** honest fact mentions in readable derived records, after / before.
+  - **Closure over-approximation:** closure records whose content holds no target fact.
+  - **Over-retraction:** those of them that are not readable afterwards, directly or through a replacement.
+  - poisoned_doc also reports its four stages from the auto runs.
+- **Stats.**
+  - Binary outcomes use Wilson 95% intervals, with the exact one-sided Clopper–Pearson bound added at 0/n.
+  - Continuous rates and paired differences (by seed) use trial-level percentile bootstrap intervals with B=10,000 and a fixed seed.
+  - Paired differences: auto, delete and quarantine against clean, and auto against delete.
+- **Timing is not reported in M8a.** Wall time under a 12-process pool is not a cost measurement (ERRORS 41), so the cost split comes in M8b and runs serially.
+- **Output.** `trials.jsonl` and `summary.md` are byte-identical across reruns, and `summary.json` is too now that timing is gone. A full run takes about 3 minutes on 12 cores.
+- **First FakeLLM results (30 seeds):**
+  - **delete, auto and quarantine:** structural and guarded retrieval residue 0/30 in both scenarios (Wilson upper bound 0.114, one-sided Clopper–Pearson 0.095).
+  - **naive_delete:** residue in 30/30 trials. On poisoned_doc it also leaves the answers contaminated (0.997).
+  - **auto:** keeps record counts. delete and quarantine lose 41.6% of records on poisoned_doc (preservation 0.584) and keep only 12.2% of honest-fact mentions.
+  - **Negative result: auto is not the clean world.** On poisoned_doc, auto has the same number of readable records as clean but 53.7 fewer honest mentions (paired, bootstrap 95% [−54.9, −52.6]). Re-derivation replays the old inputs minus the retracted one; it does not re-run the retrieval that would have picked another document.
+  - **Closure over-approximation is 0** in the testbed, because every step's read-set equals its declared inputs. Over-approximation shows up only in the M1 slice (the reminder).
+  - **Utility** does not separate the configs on FakeLLM (identical everywhere), because FakeLLM's answers are extractive.
+
 **M6 decisions (the user may overrule any):**
 - **Entry points:** `retract audit <path>...` (`[project.scripts]`, or `python -m retract.cli audit`). The code is in `retract/audit.py`, stdlib `ast` and `tomllib` only.
 - **What is flagged:** a call to `.add/.upsert/.put/.add_texts/.add_documents` on a value bound to a known memory client. On Retract's own adapters, `.write` is flagged too, because it skips lineage and the guard.

@@ -145,13 +145,13 @@ def test_write_racing_block_is_held_when_its_row_commits_first(rt, tmp_path, mon
 def test_threaded_writes_racing_block_are_never_missed(rt, tmp_path):
     p = add(rt, "Priya prefers WhatsApp.")
     derive = concat(rt)
-    warmed, done, rejected = threading.Event(), [], []
+    warmed, stop, done, rejected = threading.Event(), threading.Event(), [], []
 
     def writer():
         w = Retract(tmp_path / "lineage.db", stores=rt.stores)
         wd = w.derives("w", agent="support", tier="shared")(lambda ins: "S " + ins[0].content)
         for _ in range(100_000):  # until BLOCK has rejected a few writes
-            if len(rejected) >= 3:
+            if len(rejected) >= 3 or stop.is_set():
                 break
             try:
                 done.append(wd(inputs=[p.record_id]).record_id)
@@ -161,12 +161,19 @@ def test_threaded_writes_racing_block_are_never_missed(rt, tmp_path):
                 warmed.set()  # BLOCK fires while the writer keeps going
         w.close()
 
-    t = threading.Thread(target=writer)
+    t = threading.Thread(target=writer, daemon=True)
     t.start()
-    assert warmed.wait(30)
-    derive(inputs=[p])
-    held = rt.lineage.block(PRIYA, "op-1")
-    t.join()
+    blocked = False
+    try:
+        assert warmed.wait(30)
+        derive(inputs=[p])
+        held = rt.lineage.block(PRIYA, "op-1")
+        blocked = True
+    finally:
+        if not blocked:  # no rejections will ever come: stop the writer, or it spins on
+            stop.set()
+        t.join(60)
+    assert not t.is_alive()
     labeled = {
         r[0]
         for r in rt.lineage.conn.execute(

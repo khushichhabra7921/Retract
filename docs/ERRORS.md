@@ -172,3 +172,36 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 
 ### 39. Ruff `E501` in `cache.py` and `I001` in `tests/test_llm.py`
 - **Fix:** `ruff check --fix` sorted the imports, and `ruff format` wrapped the line.
+
+## M8a (FakeLLM experiment harness)
+
+### 40. Stats tests failed: `wilson(30, 30)` upper bound and nested `pytest.approx`
+- **Cause:** the tests were wrong. The upper bound comes out as 1 - 1e-16 in floating point, not exactly 1.0, and `pytest.approx` does not compare nested tuples.
+- **Fix:** compare the upper bound with `approx`, and unpack the paired result before comparing.
+
+### 41. Quarantine op averaged 89.6 s on poisoned_doc in the first full run
+- **Symptom:** mean `op_seconds` was 89.55 with bootstrap 95% [1.28, 265.38], against 1.15 for delete on the same closure. The same op takes 0.75 s serially, and a full rerun gave 0.84 [0.77, 0.92].
+- **Cause:** not the code. A few trials whose op window spanned a stall of the machine recorded hundreds of seconds. The same session also saw a misleading 600 s tool timeout on a run whose workers lived about 3 minutes.
+- **Fix:** M8a reports no wall-clock timing. Time under a 12-process pool is not a cost measurement anyway. The M8b cost split runs serially and reports medians.
+
+### 42. Shell-embedded patch to `experiments/run.py` failed on a newline escape
+- **Cause:** entry 31 again. The patch carried a doubled backslash, which reached Python as a single one.
+- **Fix:** `configs.py` (no backslashes) had been patched; `run.py` had not, since the patch asserts every pair before writing. `run.py` was then edited with the editor tool.
+
+### 43. `make: command not found` when running `make experiments`
+- **Cause:** entry 2: Git Bash on this machine has no make.
+- **Fix:** ran the recipe's single command, `uv run python -m experiments.run`. The Makefile is unchanged; CI does not use make.
+
+### 44. Ruff `E501` in `experiments/run.py` and `testbed/scenarios.py`; mypy errors in `experiments/`
+- **Fix:**
+  - The residue predicates moved into a module-level `FLAGS` table next to `METRICS`.
+  - Long lines were wrapped.
+  - A reused variable name in `_probe` was renamed.
+  - `states()` got an annotation.
+  - `clopper_pearson_upper_zero` uses `math.pow`, so it returns `float` and not `Any`.
+
+### 45. One unidentified test failure and one spinning pytest under CPU load
+- **Symptom:** the full suite, run alongside a 12-process experiment run, reported `1 failed, 90 passed` once. The failure's name was lost, because the command kept only the last output line. A later run under the same load left one pytest process burning CPU (242 CPU-seconds in 10 minutes) until it was stopped.
+- **Not reproduced:** 7 further runs under load passed: 6 of the guard, engine, testbed and experiment modules, and 1 full verbose run with `faulthandler_timeout`. Without load the suite passes every time.
+- **Likely cause (unconfirmed):** `test_threaded_writes_racing_block_are_never_missed` is the only test with a thread. Its non-daemon writer loops up to 100,000 writes until BLOCK rejects 3. If the main thread failed first (`warmed.wait(30)` timing out under load, or `database is locked` after `busy_timeout = 5000` while the tight writer loop starves it), no rejection would ever come and the writer would spin.
+- **Fix:** the writer stops when the main thread fails before BLOCK. It is a daemon thread, the test joins it with a 60 s cap and asserts it ended. A throwaway test that forced BLOCK to raise confirmed the test now fails in 0.5 s. If a failure shows up again, the log keeps the full `-rf` report.
