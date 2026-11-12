@@ -1,0 +1,119 @@
+{
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "configs": [
+    "auto",
+    "auto_leak",
+    "auto_paraphrase"
+  ],
+  "rule": "lowest mean per-trial (FN + FP) / replacements; ties to the lower threshold",
+  "grid": [
+    {
+      "threshold": 0.4,
+      "TP": 49,
+      "FP": 0,
+      "FN": 1073,
+      "TN": 561,
+      "mean_trial_error": 0.3944444444444445
+    },
+    {
+      "threshold": 0.45,
+      "TP": 42,
+      "FP": 0,
+      "FN": 1080,
+      "TN": 561,
+      "mean_trial_error": 0.43333333333333335
+    },
+    {
+      "threshold": 0.5,
+      "TP": 26,
+      "FP": 0,
+      "FN": 1096,
+      "TN": 561,
+      "mean_trial_error": 0.5222222222222223
+    },
+    {
+      "threshold": 0.55,
+      "TP": 30,
+      "FP": 0,
+      "FN": 1092,
+      "TN": 561,
+      "mean_trial_error": 0.5
+    },
+    {
+      "threshold": 0.6,
+      "TP": 30,
+      "FP": 0,
+      "FN": 1092,
+      "TN": 561,
+      "mean_trial_error": 0.5
+    },
+    {
+      "threshold": 0.65,
+      "TP": 30,
+      "FP": 0,
+      "FN": 1092,
+      "TN": 561,
+      "mean_trial_error": 0.5
+    },
+    {
+      "threshold": 0.7,
+      "TP": 30,
+      "FP": 0,
+      "FN": 1092,
+      "TN": 561,
+      "mean_trial_error": 0.5
+    },
+    {
+      "threshold": 0.75,
+      "TP": 393,
+      "FP": 0,
+      "FN": 561,
+      "TN": 561,
+      "mean_trial_error": 0.3333333333333333
+    },
+    {
+      "threshold": 0.8,
+      "TP": 393,
+      "FP": 0,
+      "FN": 561,
+      "TN": 561,
+      "mean_trial_error": 0.3333333333333333
+    },
+    {
+      "threshold": 0.85,
+      "TP": 393,
+      "FP": 0,
+      "FN": 561,
+      "TN": 561,
+      "mean_trial_error": 0.3333333333333333
+    },
+    {
+      "threshold": 0.9,
+      "TP": 393,
+      "FP": 0,
+      "FN": 561,
+      "TN": 561,
+      "mean_trial_error": 0.3333333333333333
+    },
+    {
+      "threshold": 0.95,
+      "TP": 393,
+      "FP": 0,
+      "FN": 561,
+      "TN": 561,
+      "mean_trial_error": 0.3333333333333333
+    }
+  ],
+  "chosen": 0.75
+}

@@ -43,11 +43,12 @@ def _closure_hash(ids: Iterable[str]) -> str:
 
 
 class Engine:
-    def __init__(self, rt: Retract, journal: Journal, embed: Embed) -> None:
+    def __init__(self, rt: Retract, journal: Journal, embed: Embed, threshold: float) -> None:
         self.rt = rt
         self.lineage = rt.lineage
         self.journal = journal
         self.embed = embed
+        self.threshold = threshold
 
     # -- PLAN -------------------------------------------------------------------------------
 
@@ -327,7 +328,7 @@ class Engine:
 
         supported = [r.content for r in self.lineage.records(inputs).values() if r.content]
         if new.status == "quarantined" or forbidden_facts(
-            content, retracted, supported, self.embed
+            content, retracted, supported, self.embed, self.threshold
         ):
             self.lineage.set_status(new_id, "quarantined")
             effect, detail = "replacement_quarantined", "repair_unverified"
@@ -408,7 +409,12 @@ class Engine:
         if probes:
             # shortcut: supports = every independent readable primary, upgrade to an index if big
             retrieval = residue.measure(
-                self.rt, probes, retracted, self.lineage.independent_primaries(source), self.embed
+                self.rt,
+                probes,
+                retracted,
+                self.lineage.independent_primaries(source),
+                self.embed,
+                self.threshold,
             )
         else:
             retrieval = {"status": "not_run", "reason": "retracted content already purged"}

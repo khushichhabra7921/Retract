@@ -496,7 +496,7 @@ Never cut: experiments, receipts, recovery, probes.
 
 **M8a decisions: FakeLLM experiment harness (Nov 12; the user may overrule any):**
 - **Scope.** M8a covers `experiments/` (`stats.py`, `configs.py`, `run.py`), `make experiments`, and committed results in `experiments/results/fake/`. Still open for M8b: leak and paraphrase injection (runtime-check FN/FP), the cost split, over-fetch impact and Groq configs. RESULTS.md and the README follow after that.
-- **Seeds.** `testbed.data.dataset(seed)` regenerates the code words and templates of the 17 seeded personas and 28 KB docs. Fact ids, the 3 hand-written users and both refund docs stay fixed, and `dataset(2026)` equals the M5 data. A trial seed also shuffles the ticket order. Seeds are 1–30, and every config of a seed is paired on the same data, order and questions. The Oracle class gives each seed's fact oracle.
+- **Seeds.** `testbed.data.dataset(seed)` regenerates the code words and templates of the 17 seeded personas and 28 KB docs. Fact ids, the 3 hand-written users and both refund docs stay fixed, and `dataset(2026)` equals the M5 data. A trial seed also shuffles the ticket order. Reported runs use the test seeds 10–39 (M8b; M8a first used 1–30, ERRORS 46), and every config of a seed is paired on the same data, order and questions. The Oracle class gives each seed's fact oracle.
 - **Configs.** Each (scenario, seed) gets 5 runs:
   - `clean`: the target source is never ingested.
   - `naive_delete`: the source's primary items are deleted from their stores directly.
@@ -519,13 +519,33 @@ Never cut: experiments, receipts, recovery, probes.
   - Paired differences: auto, delete and quarantine against clean, and auto against delete.
 - **Timing is not reported in M8a.** Wall time under a 12-process pool is not a cost measurement (ERRORS 41), so the cost split comes in M8b and runs serially.
 - **Output.** `trials.jsonl` and `summary.md` are byte-identical across reruns, and `summary.json` is too now that timing is gone. A full run takes about 3 minutes on 12 cores.
-- **First FakeLLM results (30 seeds):**
+- **FakeLLM results (test seeds 10–39):**
   - **delete, auto and quarantine:** structural and guarded retrieval residue 0/30 in both scenarios (Wilson upper bound 0.114, one-sided Clopper–Pearson 0.095).
-  - **naive_delete:** residue in 30/30 trials. On poisoned_doc it also leaves the answers contaminated (0.997).
-  - **auto:** keeps record counts. delete and quarantine lose 41.6% of records on poisoned_doc (preservation 0.584) and keep only 12.2% of honest-fact mentions.
-  - **Negative result: auto is not the clean world.** On poisoned_doc, auto has the same number of readable records as clean but 53.7 fewer honest mentions (paired, bootstrap 95% [−54.9, −52.6]). Re-derivation replays the old inputs minus the retracted one; it does not re-run the retrieval that would have picked another document.
+  - **naive_delete:** residue in 30/30 trials. On poisoned_doc it also leaves the answers contaminated (0.993).
+  - **auto:** keeps record counts. delete and quarantine lose 41.9% of records on poisoned_doc (preservation 0.581) and keep only 11.5% of honest-fact mentions.
+  - **Negative result: auto is not the clean world.** On poisoned_doc, auto has the same number of readable records as clean but 54.5 fewer honest mentions (paired, bootstrap 95% [−55.8, −53.1]).
+  - **poisoned_doc stages (auto):** the false policy entered memory once, was promoted into 53.5 records on average, influenced 19.87 of 20 answers, and was gone after retraction in 30/30 trials. Re-derivation replays the old inputs minus the retracted one; it does not re-run the retrieval that would have picked another document.
   - **Closure over-approximation is 0** in the testbed, because every step's read-set equals its declared inputs. Over-approximation shows up only in the M1 slice (the reminder).
   - **Utility** does not separate the configs on FakeLLM (identical everywhere), because FakeLLM's answers are extractive.
+
+**M8b decisions: injection, threshold, cost and over-fetch (Nov 12; the user may overrule any):**
+- **Injection configs:**
+  - `auto_leak` re-emits one target fact verbatim; `auto_paraphrase` re-emits one of its two paraphrases. FakeLLM adds the text to every summary written during repair only; the fact and paraphrase are chosen per seed.
+  - The pre-retraction state is unchanged, so both configs stay paired with the others (`check_pairing`).
+  - Every replacement the op writes is labeled TP, FP, FN or TN: runtime flagged (quarantined) vs oracle leaked.
+  - Rates are per trial and the intervals resample trials, because the replacements within a trial are not independent.
+- **Threshold.** `Retract(similarity_threshold=...)` now reaches the post-repair check and the residue probes; it defaults to `verification.SIMILARITY_THRESHOLD`.
+  - **Sweep:** `--tune` ran 0.40–0.95 in steps of 0.05 over auto, auto_leak and auto_paraphrase on the dev seeds 0–9, and wrote `experiments/results/tuning.json`.
+  - **Rule (fixed before the sweep):** lowest mean per-trial (FN + FP) / replacements, with ties going to the lower threshold.
+  - **Result:** 0.75–0.95 tie, so the rule picks 0.75. It is frozen as `configs.THRESHOLD` and the SDK default, and a test checks all three agree.
+  - **The sweep is not monotone.** Below 0.75 even verbatim leaks pass (TP 26–49 instead of 393), because a low threshold lets the "supported by an input" exemption match a look-alike honest sentence (RP-30 for RP-90).
+- **Cost split.** `experiments/cost.py` runs serially after the pool has exited, on test seeds 10–14 with auto. It reports medians and quartiles in `cost.json` and `cost.md`. Timings vary run to run, so they are kept apart from the reproducible summary.
+- **Over-fetch.** A short guarded read returns fewer than k results although the tier holds at least k readable records. It is measured on the answer reads of every state.
+- **FakeLLM results (test seeds 10–39, threshold 0.75):**
+  - **Leaks are caught.** Verbatim leaks are TP on every replacement (1098 on poisoned_doc, 91 on priya), with 0 FN and 0 FP, and the outcome is `contained` in 30/30. Without injection, every replacement is TN.
+  - **Negative result: paraphrases are never caught.** FN on every replacement (1605 and 92), at every threshold of the sweep. The op still ends `completed`, and the receipt reports retrieval residue `pass`, because the probes use the same heuristic. Meanwhile the oracle finds structural residue in 30/30 trials and 100% contaminated answers on poisoned_doc. So FakeEmbedder's hashed bag-of-words cannot support a claim about paraphrased leaks, and a semantic embedder is future work.
+  - **Over-fetch shortfall:** quarantine leaves 43.6% of guarded reads short on poisoned_doc ([37.1%, 49.8%]), because 54 quarantined records crowd the tiers past the k×4 over-fetch. auto, delete and clean have none, and utility is unchanged on FakeLLM.
+  - **Cost (medians):** a Retract write takes 7.4–7.9 ms vs 0.13–0.15 ms for a raw adapter write, about 55×, mostly durable SQLite commits on the crash-safe write path. A guarded read is about 1.9× a raw read (1.2 ms vs 0.63 ms). The auto op takes 0.31 s on priya (closure 5) and 1.94 s on poisoned_doc (closure 54), where journal, BLOCK, purge and structural checks dominate (1.91 s) and probes take 0.06 s. Re-derivation is about 0 s on FakeLLM; a hosted LLM adds its latency to each of the 4 or 54 calls.
 
 **M6 decisions (the user may overrule any):**
 - **Entry points:** `retract audit <path>...` (`[project.scripts]`, or `python -m retract.cli audit`). The code is in `retract/audit.py`, stdlib `ast` and `tomllib` only.

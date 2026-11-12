@@ -37,8 +37,9 @@ extend-exclude = ["spikes"]  # throwaway evidence scripts, kept as run
 select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.retract.audit]
-# The adapters are the SDK's own write path; spikes are throwaway evidence scripts.
-allow = ["retract/adapters/*", "spikes/*"]
+# The adapters are the SDK's own write path; spikes are throwaway evidence scripts;
+# the cost benchmark writes to a raw adapter on purpose, as the capture-overhead baseline.
+allow = ["retract/adapters/*", "spikes/*", "experiments/cost.py"]
 
 [tool.mypy]
 files = ["retract/core"]

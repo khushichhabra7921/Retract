@@ -7,6 +7,8 @@ naive_delete  delete the source's own primary items from their stores, bypassing
 delete        rt.retract(mode="delete"): purge the whole affected closure, rebuild nothing
 auto          rt.retract(mode="auto"): purge the source's records, re-derive the rest
 quarantine    rt.retract(mode="quarantine"): hide the whole affected closure
+auto_leak     auto, but FakeLLM re-emits a target fact verbatim during repair (leak injection)
+auto_paraphrase  auto, but FakeLLM re-emits a paraphrase of it (paraphrase injection)
 """
 
 from __future__ import annotations
@@ -17,14 +19,23 @@ from pathlib import Path
 from typing import Any
 
 from retract import Retract
+from retract.core.verification import SIMILARITY_THRESHOLD
 from retract.derive.fakes import FakeLLM
 from testbed.agents import LLM, TIERS, Logs, Testbed
-from testbed.data import PERSONAS, Fact, Oracle, dataset
+from testbed.data import PERSONAS, Fact, Oracle, confusion, dataset
 from testbed.scenarios import READABLE, exposure, make_stores, setup, spread
 
-CONFIGS = ("clean", "unretracted", "naive_delete", "delete", "auto", "quarantine")
-RUNS = ("clean", "naive_delete", "delete", "auto", "quarantine")  # unretracted = a run's before
-MODES = ("delete", "auto", "quarantine")
+CONFIGS = ("clean", "unretracted", "naive_delete", "delete", "auto", "quarantine",
+           "auto_leak", "auto_paraphrase")  # fmt: skip
+RUNS = tuple(c for c in CONFIGS if c != "unretracted")  # unretracted = a run's before state
+MODES = {"delete": "delete", "auto": "auto", "quarantine": "quarantine",
+         "auto_leak": "auto", "auto_paraphrase": "auto"}  # fmt: skip
+INJECTED = ("auto_leak", "auto_paraphrase")
+DEV_SEEDS = range(0, 10)  # threshold tuning only
+TEST_SEEDS = range(10, 40)  # every reported result
+# Post-repair similarity threshold, tuned on DEV_SEEDS (experiments/results/tuning.json) and
+# frozen; the SDK default must match it (tested).
+THRESHOLD = SIMILARITY_THRESHOLD
 
 PRIMARIES_OF_SOURCE = (
     "SELECT r.tier, r.adapter_record_id FROM records r"
@@ -40,8 +51,22 @@ def expected_facts(scenario: str, oracle: Oracle) -> list[set[str] | None]:
     return [{"refund-true"} for _ in PERSONAS]
 
 
+def injection(config: str, seed: int, facts: tuple[Fact, ...], target: set[str]) -> str | None:
+    """The text FakeLLM re-emits during repair: one target fact, verbatim or paraphrased."""
+    if config not in INJECTED:
+        return None
+    rng = random.Random(f"inject-{seed}")
+    fact = rng.choice(sorted((f for f in facts if f.fact_id in target), key=lambda f: f.fact_id))
+    return fact.text if config == "auto_leak" else rng.choice(fact.paraphrases)
+
+
 def run_trial(
-    scenario: str, seed: int, config: str, out: Path, llm: LLM | None = None
+    scenario: str,
+    seed: int,
+    config: str,
+    out: Path,
+    llm: LLM | None = None,
+    threshold: float = THRESHOLD,
 ) -> dict[str, Any]:
     if config not in RUNS:
         raise ValueError(f"config must be one of {RUNS}")
@@ -58,7 +83,7 @@ def run_trial(
 
     out.mkdir(parents=True, exist_ok=True)
     stores = make_stores(out, "simple")
-    rt = Retract(out / "lineage.db", stores=stores)
+    rt = Retract(out / "lineage.db", stores=stores, similarity_threshold=threshold)
     try:
         tb = Testbed(rt, llm, Logs(out), facts=ingest)
         tb.ingest()
@@ -70,6 +95,8 @@ def run_trial(
             return _measure(rt, tb, questions, target, oracle, expected, probes)
 
         row: dict[str, Any] = {"scenario": scenario, "seed": seed, "config": config}
+        if threshold != THRESHOLD:
+            row["threshold"] = threshold
         staged = scenario == "poisoned_doc"
         if config == "clean":
             row["after"] = measure()
@@ -83,7 +110,10 @@ def run_trial(
                 rt.stores[tier].delete(adapter_id)
             row["op"] = {"deleted": len(primaries)}
         else:
-            row["op"] = _retract(rt, llm, source, config, target, oracle)
+            inject = injection(config, seed, facts, target)
+            if inject is not None and not isinstance(llm, FakeLLM):
+                raise ValueError("injection configs need FakeLLM")
+            row["op"] = _retract(rt, llm, source, MODES[config], target, oracle, inject)
         row["after"] = measure()
         if staged:
             row["stages_after"] = spread(rt, target, oracle)
@@ -95,13 +125,25 @@ def run_trial(
 
 
 def _retract(
-    rt: Retract, llm: LLM, source: str, mode: Any, target: set[str], oracle: Oracle
+    rt: Retract,
+    llm: LLM,
+    source: str,
+    mode: Any,
+    target: set[str],
+    oracle: Oracle,
+    inject: str | None = None,
 ) -> dict[str, Any]:
     plan = rt.retract(source, mode, dry_run=True)
     closure = {a.record_id: a.action for a in plan.actions}
     before = rt.lineage.records(list(closure))
     calls0 = getattr(llm, "calls", 0)
-    receipt = plan.execute()
+    if inject is not None:
+        llm.inject = inject  # type: ignore[attr-defined]  # only while repairs run
+    try:
+        receipt = plan.execute()
+    finally:
+        if inject is not None:
+            llm.inject = None  # type: ignore[attr-defined]
     return {
         "llm_calls": getattr(llm, "calls", 0) - calls0,
         "outcome": receipt.outcome,
@@ -114,7 +156,23 @@ def _retract(
         "overapprox_ids": sorted(
             rid for rid, r in before.items() if not oracle.facts_in(r.content or "") & target
         ),
+        "runtime_check": _runtime_check(rt, list(closure), target, oracle),
     }
+
+
+def _runtime_check(
+    rt: Retract, closure: list[str], target: set[str], oracle: Oracle
+) -> dict[str, int]:
+    """Each replacement's post-repair decision against the oracle: TP, FP, FN or TN."""
+    marks = ",".join("?" * len(closure))
+    rows = rt.lineage.conn.execute(
+        f"SELECT content, status FROM records WHERE supersedes IN ({marks})", closure
+    ).fetchall()
+    counts = dict.fromkeys(("TP", "FP", "FN", "TN"), 0)
+    for content, status in rows:
+        leaked = bool(oracle.facts_in(content or "") & target)
+        counts[confusion(status == "quarantined", leaked)] += 1
+    return counts
 
 
 def _over_retraction(rt: Retract, op: dict[str, Any]) -> None:
@@ -149,8 +207,28 @@ def _measure(
     expected: list[set[str] | None],
     probes: list[str],
 ) -> dict[str, Any]:
-    answers = [tb.answer(q) for q in questions]
+    readable = dict(
+        rt.lineage.conn.execute(
+            f"SELECT tier, COUNT(*) FROM records WHERE {READABLE} GROUP BY tier"
+        ).fetchall()
+    )
+    reads = Counter[str]()
+    plain = rt.guarded_search
+
+    def counted(query: str, *, tier: str, k: int = 5) -> list[Any]:
+        out = plain(query, tier=tier, k=k)
+        reads["guarded_reads"] += 1
+        # over-fetch impact: fewer than k results although the tier has k readable records
+        reads["short_reads"] += len(out) < min(k, readable.get(tier, 0))
+        return out
+
+    rt.guarded_search = counted  # type: ignore[method-assign]
+    try:
+        answers = [tb.answer(q) for q in questions]
+    finally:
+        del rt.guarded_search
     m = exposure(rt, tb, questions, target, oracle, answers=answers)
+    m.update(reads)
     scored = [(a, e) for a, e in zip(answers, expected, strict=True) if e is not None]
     m["useful_answers"] = sum(1 for a, e in scored if oracle.facts_in(a) & e)
     m["utility_questions"] = len(scored)

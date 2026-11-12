@@ -205,3 +205,16 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 - **Not reproduced:** 7 further runs under load passed: 6 of the guard, engine, testbed and experiment modules, and 1 full verbose run with `faulthandler_timeout`. Without load the suite passes every time.
 - **Likely cause (unconfirmed):** `test_threaded_writes_racing_block_are_never_missed` is the only test with a thread. Its non-daemon writer loops up to 100,000 writes until BLOCK rejects 3. If the main thread failed first (`warmed.wait(30)` timing out under load, or `database is locked` after `busy_timeout = 5000` while the tight writer loop starves it), no rejection would ever come and the writer would spin.
 - **Fix:** the writer stops when the main thread fails before BLOCK. It is a daemon thread, the test joins it with a 60 s cap and asserts it ended. A throwaway test that forced BLOCK to raise confirmed the test now fails in 0.5 s. If a failure shows up again, the log keeps the full `-rf` report.
+
+## M8b (injection, threshold tuning, cost, over-fetch)
+
+### 46. M8a reported results on seeds 1-30, which overlap the dev seeds
+- **Cause:** PLAN (Verification, "Threshold") reserves seeds 0–9 for tuning the post-repair threshold and reports on test seeds 10–39. M8a used `range(1, 31)`.
+- **Fix:** `experiments/configs.py` defines `DEV_SEEDS = range(0, 10)` and `TEST_SEEDS = range(10, 40)`. `--tune` uses only the dev seeds, and every reported run uses the test seeds. A test asserts the two sets are disjoint. The committed M8a results were regenerated on seeds 10–39.
+
+### 47. `retract audit .` flagged `experiments/cost.py:74` (`raw.write()` on SimpleVectorStore)
+- **Cause:** a correct finding. The cost benchmark writes to a raw adapter on purpose, as the baseline for capture overhead.
+- **Fix:** added `experiments/cost.py` to `[tool.retract.audit] allow`, with the reason in a comment. `test_repository_audits_clean` caught it.
+
+### 48. mypy: unused `type: ignore` in `experiments/cost.py`
+- **Fix:** removed it. Assigning to `residue.measure` type-checks without one.

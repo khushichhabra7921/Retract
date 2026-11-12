@@ -9,8 +9,9 @@ replacement is quarantined.
 import re
 from collections.abc import Callable, Sequence
 
-# shortcut: placeholder threshold, tune on dev seeds 0-9 in M4 and freeze in experiments/configs.py
-SIMILARITY_THRESHOLD = 0.85
+# Tuned on dev seeds 0-9 with FakeEmbedder (experiments/results/tuning.json): 0.75-0.95 tie and the
+# pre-set rule takes the lowest. Re-tune if the embedder changes.
+SIMILARITY_THRESHOLD = 0.75
 
 Embed = Callable[[str], list[float]]
 
@@ -23,20 +24,24 @@ def normalize(text: str) -> str:
     return " ".join(re.sub(r"[^\w\s]", " ", text.lower()).split())
 
 
-def _near(sentence: str, others: Sequence[str], joined: str, embed: Embed) -> bool:
+def _near(
+    sentence: str, others: Sequence[str], joined: str, embed: Embed, threshold: float
+) -> bool:
     n = normalize(sentence)
     if not n:
         return False
     if f" {n} " in f" {joined} ":
         return True
     v = embed(sentence)
-    return any(
-        sum(a * b for a, b in zip(v, embed(o), strict=True)) >= SIMILARITY_THRESHOLD for o in others
-    )
+    return any(sum(a * b for a, b in zip(v, embed(o), strict=True)) >= threshold for o in others)
 
 
 def forbidden_facts(
-    candidate: str, retracted: Sequence[str], supported: Sequence[str], embed: Embed
+    candidate: str,
+    retracted: Sequence[str],
+    supported: Sequence[str],
+    embed: Embed,
+    threshold: float = SIMILARITY_THRESHOLD,
 ) -> list[str]:
     """Retracted sentences present in `candidate` and absent from `supported`.
 
@@ -49,5 +54,6 @@ def forbidden_facts(
         s
         for t in retracted
         for s in sentences(t)
-        if _near(s, cand, cand_joined, embed) and not _near(s, sup, sup_joined, embed)
+        if _near(s, cand, cand_joined, embed, threshold)
+        and not _near(s, sup, sup_joined, embed, threshold)
     ]

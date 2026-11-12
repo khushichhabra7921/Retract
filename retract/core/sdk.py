@@ -17,7 +17,7 @@ from retract.core.interfaces import MemoryAdapter
 from retract.core.lineage import LineageStore
 from retract.core.models import Mode, OrphanReport, Plan, Record
 from retract.core.operations import Journal
-from retract.core.verification import Embed
+from retract.core.verification import SIMILARITY_THRESHOLD, Embed
 from retract.derive.fakes import FakeEmbedder
 from retract.receipts import receipt as receipts
 
@@ -50,6 +50,7 @@ class Retract:
         *,
         embed: Embed | None = None,
         lease_seconds: float = 60.0,
+        similarity_threshold: float = SIMILARITY_THRESHOLD,
     ) -> None:
         key = os.environ.get("RETRACT_PSEUDONYM_KEY")
         if not key:
@@ -59,7 +60,7 @@ class Retract:
         self.registry: dict[str, Registered] = {}
         self.owner_token = uuid.uuid4().hex  # identifies this process as an op lease owner
         self.journal = Journal(self.lineage, self.owner_token, lease_seconds)
-        self.engine = Engine(self, self.journal, embed or FakeEmbedder())
+        self.engine = Engine(self, self.journal, embed or FakeEmbedder(), similarity_threshold)
 
     def close(self) -> None:
         self.lineage.close()

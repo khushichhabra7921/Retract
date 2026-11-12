@@ -85,10 +85,17 @@
           ]
         },
         "honest_mentions": {
-          "mean": 278.8666666666667,
+          "mean": 278.93333333333334,
           "bootstrap95": [
-            278.2,
-            279.6333333333333
+            277.96666666666664,
+            280.1666666666667
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         }
       },
@@ -149,9 +156,9 @@
           ]
         },
         "answer_contamination": {
-          "mean": 0.9966666666666666,
+          "mean": 0.9933333333333334,
           "bootstrap95": [
-            0.99,
+            0.9833333333333333,
             1.0
           ]
         },
@@ -170,10 +177,17 @@
           ]
         },
         "honest_mentions": {
-          "mean": 225.13333333333333,
+          "mean": 224.46666666666667,
           "bootstrap95": [
-            223.73333333333332,
-            226.46666666666667
+            222.93333333333334,
+            225.96666666666667
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         }
       },
@@ -234,9 +248,9 @@
           ]
         },
         "answer_contamination": {
-          "mean": 0.9966666666666666,
+          "mean": 0.9933333333333334,
           "bootstrap95": [
-            0.99,
+            0.9833333333333333,
             1.0
           ]
         },
@@ -255,10 +269,17 @@
           ]
         },
         "honest_mentions": {
-          "mean": 225.13333333333333,
+          "mean": 224.46666666666667,
           "bootstrap95": [
-            223.73333333333332,
-            226.46666666666667
+            222.93333333333334,
+            225.96666666666667
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         },
         "record_preservation": {
@@ -352,41 +373,48 @@
           ]
         },
         "readable_records": {
-          "mean": 75.93333333333334,
+          "mean": 75.5,
           "bootstrap95": [
-            74.86666666666666,
-            76.96666666666667
+            74.33333333333333,
+            76.63333333333334
           ]
         },
         "honest_mentions": {
-          "mean": 27.733333333333334,
+          "mean": 26.0,
           "bootstrap95": [
-            23.466666666666665,
-            31.866666666666667
+            21.333333333333332,
+            30.533333333333335
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         },
         "record_preservation": {
-          "mean": 0.584102564102564,
+          "mean": 0.5807692307692308,
           "bootstrap95": [
-            0.5758974358974359,
-            0.592051282051282
+            0.5717948717948718,
+            0.5894871794871794
           ]
         },
         "honest_fact_retention": {
-          "mean": 0.12233817904622836,
+          "mean": 0.11478164951416045,
           "bootstrap95": [
-            0.10391396955232059,
-            0.1399242526445308
+            0.09480093518566383,
+            0.1342843751565811
           ]
         },
         "outcomes": {
           "completed": 30
         },
         "closure_size": {
-          "mean": 54.06666666666667,
+          "mean": 54.5,
           "bootstrap95": [
-            53.03333333333333,
-            55.13333333333333
+            53.36666666666667,
+            55.666666666666664
           ]
         },
         "rederive_llm_calls": {
@@ -409,6 +437,34 @@
             0.0,
             0.0
           ]
+        },
+        "runtime_check": {
+          "replacements": {
+            "TP": 0,
+            "FP": 0,
+            "FN": 0,
+            "TN": 0
+          },
+          "trials_with_fn": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "trials_with_fp": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          }
         }
       },
       "auto": {
@@ -494,10 +550,17 @@
           ]
         },
         "honest_mentions": {
-          "mean": 225.13333333333333,
+          "mean": 224.46666666666667,
           "bootstrap95": [
-            223.73333333333332,
-            226.46666666666667
+            222.93333333333334,
+            225.96666666666667
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         },
         "record_preservation": {
@@ -518,17 +581,17 @@
           "completed": 30
         },
         "closure_size": {
-          "mean": 54.06666666666667,
+          "mean": 54.5,
           "bootstrap95": [
-            53.03333333333333,
-            55.13333333333333
+            53.36666666666667,
+            55.666666666666664
           ]
         },
         "rederive_llm_calls": {
-          "mean": 53.06666666666667,
+          "mean": 53.5,
           "bootstrap95": [
-            52.03333333333333,
-            54.13333333333333
+            52.36666666666667,
+            54.666666666666664
           ]
         },
         "closure_overapproximation": {
@@ -544,6 +607,41 @@
             0.0,
             0.0
           ]
+        },
+        "runtime_check": {
+          "replacements": {
+            "TP": 0,
+            "FP": 0,
+            "FN": 0,
+            "TN": 1605
+          },
+          "trials_with_fn": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "trials_with_fp": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "fp_rate": {
+            "mean": 0.0,
+            "bootstrap95": [
+              0.0,
+              0.0
+            ]
+          }
         }
       },
       "quarantine": {
@@ -621,41 +719,48 @@
           ]
         },
         "readable_records": {
-          "mean": 75.93333333333334,
+          "mean": 75.5,
           "bootstrap95": [
-            74.86666666666666,
-            76.96666666666667
+            74.33333333333333,
+            76.63333333333334
           ]
         },
         "honest_mentions": {
-          "mean": 27.733333333333334,
+          "mean": 26.0,
           "bootstrap95": [
-            23.466666666666665,
-            31.866666666666667
+            21.333333333333332,
+            30.533333333333335
+          ]
+        },
+        "short_reads": {
+          "mean": 0.43555555555555553,
+          "bootstrap95": [
+            0.3711111111111111,
+            0.49777777777777776
           ]
         },
         "record_preservation": {
-          "mean": 0.584102564102564,
+          "mean": 0.5807692307692308,
           "bootstrap95": [
-            0.5758974358974359,
-            0.592051282051282
+            0.5717948717948718,
+            0.5894871794871794
           ]
         },
         "honest_fact_retention": {
-          "mean": 0.12233817904622836,
+          "mean": 0.11478164951416045,
           "bootstrap95": [
-            0.10391396955232059,
-            0.1399242526445308
+            0.09480093518566383,
+            0.1342843751565811
           ]
         },
         "outcomes": {
           "contained": 30
         },
         "closure_size": {
-          "mean": 54.06666666666667,
+          "mean": 54.5,
           "bootstrap95": [
-            53.03333333333333,
-            55.13333333333333
+            53.36666666666667,
+            55.666666666666664
           ]
         },
         "rederive_llm_calls": {
@@ -678,6 +783,381 @@
             0.0,
             0.0
           ]
+        },
+        "runtime_check": {
+          "replacements": {
+            "TP": 0,
+            "FP": 0,
+            "FN": 0,
+            "TN": 0
+          },
+          "trials_with_fn": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "trials_with_fp": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          }
+        }
+      },
+      "auto_leak": {
+        "structural_residue": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "readable_residue": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "guarded_retrieval_residue": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "raw_retrieval_residue_unquarantined": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "raw_retrieval_hits_quarantined": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "any_contaminated_answer": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "answer_contamination": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "utility": {
+          "mean": 1.0,
+          "bootstrap95": [
+            1.0,
+            1.0
+          ]
+        },
+        "readable_records": {
+          "mean": 75.5,
+          "bootstrap95": [
+            74.33333333333333,
+            76.63333333333334
+          ]
+        },
+        "honest_mentions": {
+          "mean": 26.0,
+          "bootstrap95": [
+            21.333333333333332,
+            30.533333333333335
+          ]
+        },
+        "short_reads": {
+          "mean": 0.43555555555555553,
+          "bootstrap95": [
+            0.3711111111111111,
+            0.49777777777777776
+          ]
+        },
+        "record_preservation": {
+          "mean": 0.5807692307692308,
+          "bootstrap95": [
+            0.5717948717948718,
+            0.5894871794871794
+          ]
+        },
+        "honest_fact_retention": {
+          "mean": 0.11478164951416045,
+          "bootstrap95": [
+            0.09480093518566383,
+            0.1342843751565811
+          ]
+        },
+        "outcomes": {
+          "contained": 30
+        },
+        "closure_size": {
+          "mean": 54.5,
+          "bootstrap95": [
+            53.36666666666667,
+            55.666666666666664
+          ]
+        },
+        "rederive_llm_calls": {
+          "mean": 36.6,
+          "bootstrap95": [
+            35.96666666666667,
+            37.233333333333334
+          ]
+        },
+        "closure_overapproximation": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "over_retraction": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "runtime_check": {
+          "replacements": {
+            "TP": 1098,
+            "FP": 0,
+            "FN": 0,
+            "TN": 0
+          },
+          "trials_with_fn": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "trials_with_fp": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "fn_rate": {
+            "mean": 0.0,
+            "bootstrap95": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      },
+      "auto_paraphrase": {
+        "structural_residue": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "readable_residue": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "guarded_retrieval_residue": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "raw_retrieval_residue_unquarantined": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "raw_retrieval_hits_quarantined": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "any_contaminated_answer": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "answer_contamination": {
+          "mean": 1.0,
+          "bootstrap95": [
+            1.0,
+            1.0
+          ]
+        },
+        "utility": {
+          "mean": 1.0,
+          "bootstrap95": [
+            1.0,
+            1.0
+          ]
+        },
+        "readable_records": {
+          "mean": 129.0,
+          "bootstrap95": [
+            129.0,
+            129.0
+          ]
+        },
+        "honest_mentions": {
+          "mean": 224.46666666666667,
+          "bootstrap95": [
+            222.93333333333334,
+            225.96666666666667
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "record_preservation": {
+          "mean": 0.9923076923076923,
+          "bootstrap95": [
+            0.9923076923076923,
+            0.9923076923076923
+          ]
+        },
+        "honest_fact_retention": {
+          "mean": 1.0,
+          "bootstrap95": [
+            1.0,
+            1.0
+          ]
+        },
+        "outcomes": {
+          "completed": 30
+        },
+        "closure_size": {
+          "mean": 54.5,
+          "bootstrap95": [
+            53.36666666666667,
+            55.666666666666664
+          ]
+        },
+        "rederive_llm_calls": {
+          "mean": 53.5,
+          "bootstrap95": [
+            52.36666666666667,
+            54.666666666666664
+          ]
+        },
+        "closure_overapproximation": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "over_retraction": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "runtime_check": {
+          "replacements": {
+            "TP": 0,
+            "FP": 0,
+            "FN": 1605,
+            "TN": 0
+          },
+          "trials_with_fn": {
+            "k": 30,
+            "n": 30,
+            "rate": 1.0,
+            "wilson95": [
+              0.8864866068260312,
+              0.9999999999999999
+            ]
+          },
+          "trials_with_fp": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "fn_rate": {
+            "mean": 1.0,
+            "bootstrap95": [
+              1.0,
+              1.0
+            ]
+          }
         }
       },
       "stages": {
@@ -689,16 +1169,16 @@
           ]
         },
         "2_promoted_records": {
-          "mean": 53.06666666666667,
+          "mean": 53.5,
           "bootstrap95": [
-            52.03333333333333,
-            54.13333333333333
+            52.36666666666667,
+            54.666666666666664
           ]
         },
         "3_influenced_answers": {
-          "mean": 19.933333333333334,
+          "mean": 19.866666666666667,
           "bootstrap95": [
-            19.8,
+            19.666666666666668,
             20.0
           ]
         },
@@ -742,31 +1222,31 @@
           ]
         },
         "honest_mentions: auto - clean": {
-          "mean": -53.733333333333334,
+          "mean": -54.46666666666667,
           "bootstrap95": [
-            -54.86666666666667,
-            -52.63333333333333
+            -55.833333333333336,
+            -53.13333333333333
           ]
         },
         "honest_mentions: delete - clean": {
-          "mean": -251.13333333333333,
+          "mean": -252.93333333333334,
           "bootstrap95": [
-            -255.1,
-            -247.33333333333334
+            -257.1666666666667,
+            -248.73333333333332
           ]
         },
         "honest_mentions: quarantine - clean": {
-          "mean": -251.13333333333333,
+          "mean": -252.93333333333334,
           "bootstrap95": [
-            -255.1,
-            -247.33333333333334
+            -257.1666666666667,
+            -248.73333333333332
           ]
         },
         "honest_mentions: auto - delete": {
-          "mean": 197.4,
+          "mean": 198.46666666666667,
           "bootstrap95": [
-            194.56666666666666,
-            200.33333333333334
+            195.43333333333334,
+            201.63333333333333
           ]
         },
         "readable_records: auto - clean": {
@@ -777,24 +1257,24 @@
           ]
         },
         "readable_records: delete - clean": {
-          "mean": -53.06666666666667,
+          "mean": -53.5,
           "bootstrap95": [
-            -54.13333333333333,
-            -52.03333333333333
+            -54.666666666666664,
+            -52.36666666666667
           ]
         },
         "readable_records: quarantine - clean": {
-          "mean": -53.06666666666667,
+          "mean": -53.5,
           "bootstrap95": [
-            -54.13333333333333,
-            -52.03333333333333
+            -54.666666666666664,
+            -52.36666666666667
           ]
         },
         "readable_records: auto - delete": {
-          "mean": 53.06666666666667,
+          "mean": 53.5,
           "bootstrap95": [
-            52.03333333333333,
-            54.13333333333333
+            52.36666666666667,
+            54.666666666666664
           ]
         }
       }
@@ -869,10 +1349,10 @@
           ]
         },
         "utility": {
-          "mean": 0.9543859649122807,
+          "mean": 0.9649122807017544,
           "bootstrap95": [
-            0.9228070175438596,
-            0.9754385964912281
+            0.9526315789473684,
+            0.9771929824561403
           ]
         },
         "readable_records": {
@@ -883,10 +1363,17 @@
           ]
         },
         "honest_mentions": {
-          "mean": 274.26666666666665,
+          "mean": 274.46666666666664,
           "bootstrap95": [
-            273.23333333333335,
-            275.1333333333333
+            273.9,
+            275.1
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         }
       },
@@ -954,10 +1441,10 @@
           ]
         },
         "utility": {
-          "mean": 0.9543859649122807,
+          "mean": 0.9666666666666667,
           "bootstrap95": [
-            0.9228070175438596,
-            0.9754385964912281
+            0.9543859649122807,
+            0.9771929824561403
           ]
         },
         "readable_records": {
@@ -968,10 +1455,17 @@
           ]
         },
         "honest_mentions": {
-          "mean": 270.3333333333333,
+          "mean": 270.5,
           "bootstrap95": [
-            268.93333333333334,
+            269.53333333333336,
             271.76666666666665
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         }
       },
@@ -1039,10 +1533,10 @@
           ]
         },
         "utility": {
-          "mean": 0.9543859649122807,
+          "mean": 0.9666666666666667,
           "bootstrap95": [
-            0.9228070175438596,
-            0.9754385964912281
+            0.9543859649122807,
+            0.9771929824561403
           ]
         },
         "readable_records": {
@@ -1053,10 +1547,17 @@
           ]
         },
         "honest_mentions": {
-          "mean": 270.3333333333333,
+          "mean": 270.5,
           "bootstrap95": [
-            268.93333333333334,
+            269.53333333333336,
             271.76666666666665
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         },
         "record_preservation": {
@@ -1143,48 +1644,55 @@
           ]
         },
         "utility": {
-          "mean": 0.9543859649122807,
+          "mean": 0.9666666666666667,
           "bootstrap95": [
-            0.9228070175438596,
-            0.9754385964912281
+            0.9543859649122807,
+            0.9771929824561403
           ]
         },
         "readable_records": {
-          "mean": 124.96666666666667,
+          "mean": 124.93333333333334,
           "bootstrap95": [
-            124.9,
+            124.83333333333333,
             125.0
           ]
         },
         "honest_mentions": {
-          "mean": 262.1333333333333,
+          "mean": 262.23333333333335,
           "bootstrap95": [
-            260.7,
-            263.56666666666666
+            261.1666666666667,
+            263.46666666666664
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         },
         "record_preservation": {
-          "mean": 0.9612820512820514,
+          "mean": 0.961025641025641,
           "bootstrap95": [
-            0.9607692307692308,
+            0.9602564102564103,
             0.9615384615384616
           ]
         },
         "honest_fact_retention": {
-          "mean": 0.9696644105555613,
+          "mean": 0.969435334794033,
           "bootstrap95": [
-            0.9685407902697628,
-            0.9703372168777512
+            0.9682041313366251,
+            0.9702899763809152
           ]
         },
         "outcomes": {
           "completed": 30
         },
         "closure_size": {
-          "mean": 5.033333333333333,
+          "mean": 5.066666666666666,
           "bootstrap95": [
             5.0,
-            5.1
+            5.166666666666667
           ]
         },
         "rederive_llm_calls": {
@@ -1207,6 +1715,34 @@
             0.0,
             0.0
           ]
+        },
+        "runtime_check": {
+          "replacements": {
+            "TP": 0,
+            "FP": 0,
+            "FN": 0,
+            "TN": 0
+          },
+          "trials_with_fn": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "trials_with_fp": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          }
         }
       },
       "auto": {
@@ -1278,10 +1814,10 @@
           ]
         },
         "utility": {
-          "mean": 0.9543859649122807,
+          "mean": 0.9666666666666667,
           "bootstrap95": [
-            0.9228070175438596,
-            0.9754385964912281
+            0.9543859649122807,
+            0.9771929824561403
           ]
         },
         "readable_records": {
@@ -1292,10 +1828,17 @@
           ]
         },
         "honest_mentions": {
-          "mean": 270.3333333333333,
+          "mean": 270.5,
           "bootstrap95": [
-            268.93333333333334,
+            269.53333333333336,
             271.76666666666665
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         },
         "record_preservation": {
@@ -1316,17 +1859,17 @@
           "completed": 30
         },
         "closure_size": {
-          "mean": 5.033333333333333,
+          "mean": 5.066666666666666,
           "bootstrap95": [
             5.0,
-            5.1
+            5.166666666666667
           ]
         },
         "rederive_llm_calls": {
-          "mean": 3.033333333333333,
+          "mean": 3.066666666666667,
           "bootstrap95": [
             3.0,
-            3.1
+            3.1666666666666665
           ]
         },
         "closure_overapproximation": {
@@ -1342,6 +1885,41 @@
             0.0,
             0.0
           ]
+        },
+        "runtime_check": {
+          "replacements": {
+            "TP": 0,
+            "FP": 0,
+            "FN": 0,
+            "TN": 92
+          },
+          "trials_with_fn": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "trials_with_fp": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "fp_rate": {
+            "mean": 0.0,
+            "bootstrap95": [
+              0.0,
+              0.0
+            ]
+          }
         }
       },
       "quarantine": {
@@ -1412,48 +1990,55 @@
           ]
         },
         "utility": {
-          "mean": 0.9543859649122807,
+          "mean": 0.9666666666666667,
           "bootstrap95": [
-            0.9228070175438596,
-            0.9754385964912281
+            0.9543859649122807,
+            0.9771929824561403
           ]
         },
         "readable_records": {
-          "mean": 124.96666666666667,
+          "mean": 124.93333333333334,
           "bootstrap95": [
-            124.9,
+            124.83333333333333,
             125.0
           ]
         },
         "honest_mentions": {
-          "mean": 262.1333333333333,
+          "mean": 262.23333333333335,
           "bootstrap95": [
-            260.7,
-            263.56666666666666
+            261.1666666666667,
+            263.46666666666664
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
           ]
         },
         "record_preservation": {
-          "mean": 0.9612820512820514,
+          "mean": 0.961025641025641,
           "bootstrap95": [
-            0.9607692307692308,
+            0.9602564102564103,
             0.9615384615384616
           ]
         },
         "honest_fact_retention": {
-          "mean": 0.9696644105555613,
+          "mean": 0.969435334794033,
           "bootstrap95": [
-            0.9685407902697628,
-            0.9703372168777512
+            0.9682041313366251,
+            0.9702899763809152
           ]
         },
         "outcomes": {
           "contained": 30
         },
         "closure_size": {
-          "mean": 5.033333333333333,
+          "mean": 5.066666666666666,
           "bootstrap95": [
             5.0,
-            5.1
+            5.166666666666667
           ]
         },
         "rederive_llm_calls": {
@@ -1476,28 +2061,403 @@
             0.0,
             0.0
           ]
+        },
+        "runtime_check": {
+          "replacements": {
+            "TP": 0,
+            "FP": 0,
+            "FN": 0,
+            "TN": 0
+          },
+          "trials_with_fn": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "trials_with_fp": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          }
+        }
+      },
+      "auto_leak": {
+        "structural_residue": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "readable_residue": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "guarded_retrieval_residue": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "raw_retrieval_residue_unquarantined": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "raw_retrieval_hits_quarantined": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "any_contaminated_answer": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "answer_contamination": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "utility": {
+          "mean": 0.9666666666666667,
+          "bootstrap95": [
+            0.9543859649122807,
+            0.9771929824561403
+          ]
+        },
+        "readable_records": {
+          "mean": 124.93333333333334,
+          "bootstrap95": [
+            124.83333333333333,
+            125.0
+          ]
+        },
+        "honest_mentions": {
+          "mean": 262.23333333333335,
+          "bootstrap95": [
+            261.1666666666667,
+            263.46666666666664
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "record_preservation": {
+          "mean": 0.961025641025641,
+          "bootstrap95": [
+            0.9602564102564103,
+            0.9615384615384616
+          ]
+        },
+        "honest_fact_retention": {
+          "mean": 0.969435334794033,
+          "bootstrap95": [
+            0.9682041313366251,
+            0.9702899763809152
+          ]
+        },
+        "outcomes": {
+          "contained": 30
+        },
+        "closure_size": {
+          "mean": 5.066666666666666,
+          "bootstrap95": [
+            5.0,
+            5.166666666666667
+          ]
+        },
+        "rederive_llm_calls": {
+          "mean": 3.033333333333333,
+          "bootstrap95": [
+            3.0,
+            3.1
+          ]
+        },
+        "closure_overapproximation": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "over_retraction": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "runtime_check": {
+          "replacements": {
+            "TP": 91,
+            "FP": 0,
+            "FN": 0,
+            "TN": 0
+          },
+          "trials_with_fn": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "trials_with_fp": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "fn_rate": {
+            "mean": 0.0,
+            "bootstrap95": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      },
+      "auto_paraphrase": {
+        "structural_residue": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "readable_residue": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "guarded_retrieval_residue": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "raw_retrieval_residue_unquarantined": {
+          "k": 30,
+          "n": 30,
+          "rate": 1.0,
+          "wilson95": [
+            0.8864866068260312,
+            0.9999999999999999
+          ]
+        },
+        "raw_retrieval_hits_quarantined": {
+          "k": 0,
+          "n": 30,
+          "rate": 0.0,
+          "wilson95": [
+            0.0,
+            0.11351339317396876
+          ],
+          "clopper_pearson95_upper_one_sided": 0.09503385285530419
+        },
+        "any_contaminated_answer": {
+          "k": 29,
+          "n": 30,
+          "rate": 0.9666666666666667,
+          "wilson95": [
+            0.8332960900859082,
+            0.9940914096183874
+          ]
+        },
+        "answer_contamination": {
+          "mean": 0.04833333333333334,
+          "bootstrap95": [
+            0.045000000000000005,
+            0.05
+          ]
+        },
+        "utility": {
+          "mean": 0.9666666666666667,
+          "bootstrap95": [
+            0.9543859649122807,
+            0.9771929824561403
+          ]
+        },
+        "readable_records": {
+          "mean": 128.0,
+          "bootstrap95": [
+            128.0,
+            128.0
+          ]
+        },
+        "honest_mentions": {
+          "mean": 270.5,
+          "bootstrap95": [
+            269.53333333333336,
+            271.76666666666665
+          ]
+        },
+        "short_reads": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "record_preservation": {
+          "mean": 0.9846153846153847,
+          "bootstrap95": [
+            0.9846153846153847,
+            0.9846153846153847
+          ]
+        },
+        "honest_fact_retention": {
+          "mean": 1.0,
+          "bootstrap95": [
+            1.0,
+            1.0
+          ]
+        },
+        "outcomes": {
+          "completed": 30
+        },
+        "closure_size": {
+          "mean": 5.066666666666666,
+          "bootstrap95": [
+            5.0,
+            5.166666666666667
+          ]
+        },
+        "rederive_llm_calls": {
+          "mean": 3.066666666666667,
+          "bootstrap95": [
+            3.0,
+            3.1666666666666665
+          ]
+        },
+        "closure_overapproximation": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "over_retraction": {
+          "mean": 0.0,
+          "bootstrap95": [
+            0.0,
+            0.0
+          ]
+        },
+        "runtime_check": {
+          "replacements": {
+            "TP": 0,
+            "FP": 0,
+            "FN": 92,
+            "TN": 0
+          },
+          "trials_with_fn": {
+            "k": 30,
+            "n": 30,
+            "rate": 1.0,
+            "wilson95": [
+              0.8864866068260312,
+              0.9999999999999999
+            ]
+          },
+          "trials_with_fp": {
+            "k": 0,
+            "n": 30,
+            "rate": 0.0,
+            "wilson95": [
+              0.0,
+              0.11351339317396876
+            ],
+            "clopper_pearson95_upper_one_sided": 0.09503385285530419
+          },
+          "fn_rate": {
+            "mean": 1.0,
+            "bootstrap95": [
+              1.0,
+              1.0
+            ]
+          }
         }
       },
       "paired": {
         "utility: auto - clean": {
-          "mean": 0.0,
+          "mean": 0.0017543859649122788,
           "bootstrap95": [
             0.0,
-            0.0
+            0.005263157894736836
           ]
         },
         "utility: delete - clean": {
-          "mean": 0.0,
+          "mean": 0.0017543859649122788,
           "bootstrap95": [
             0.0,
-            0.0
+            0.005263157894736836
           ]
         },
         "utility: quarantine - clean": {
-          "mean": 0.0,
+          "mean": 0.0017543859649122788,
           "bootstrap95": [
             0.0,
-            0.0
+            0.005263157894736836
           ]
         },
         "utility: auto - delete": {
@@ -1508,31 +2468,31 @@
           ]
         },
         "honest_mentions: auto - clean": {
-          "mean": -3.933333333333333,
+          "mean": -3.966666666666667,
           "bootstrap95": [
-            -4.566666666666666,
-            -3.1
+            -4.6,
+            -3.1333333333333333
           ]
         },
         "honest_mentions: delete - clean": {
-          "mean": -12.133333333333333,
+          "mean": -12.233333333333333,
           "bootstrap95": [
-            -12.866666666666667,
-            -11.333333333333334
+            -13.0,
+            -11.4
           ]
         },
         "honest_mentions: quarantine - clean": {
-          "mean": -12.133333333333333,
+          "mean": -12.233333333333333,
           "bootstrap95": [
-            -12.866666666666667,
-            -11.333333333333334
+            -13.0,
+            -11.4
           ]
         },
         "honest_mentions: auto - delete": {
-          "mean": 8.2,
+          "mean": 8.266666666666667,
           "bootstrap95": [
-            8.0,
-            8.5
+            8.033333333333333,
+            8.6
           ]
         },
         "readable_records: auto - clean": {
@@ -1543,24 +2503,24 @@
           ]
         },
         "readable_records: delete - clean": {
-          "mean": -3.033333333333333,
+          "mean": -3.066666666666667,
           "bootstrap95": [
-            -3.1,
+            -3.1666666666666665,
             -3.0
           ]
         },
         "readable_records: quarantine - clean": {
-          "mean": -3.033333333333333,
+          "mean": -3.066666666666667,
           "bootstrap95": [
-            -3.1,
+            -3.1666666666666665,
             -3.0
           ]
         },
         "readable_records: auto - delete": {
-          "mean": 3.033333333333333,
+          "mean": 3.066666666666667,
           "bootstrap95": [
             3.0,
-            3.1
+            3.1666666666666665
           ]
         }
       }
