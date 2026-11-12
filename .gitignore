@@ -17,4 +17,4 @@ build/
 *.sqlite-wal
 *.sqlite-shm
 runs/
-.claude/
+
