@@ -599,14 +599,14 @@ Never cut: experiments, receipts, recovery, probes.
 - **Schema:** all tables are in `001_init.sql` (no database has shipped yet). `user_version` migrations start from the first release.
 - **Delivered early:** the minimal guarded `search` and `SimpleVectorStore` landed in M1, because the step read-set needs them. `MemoryAdapter.update` is left out until a caller needs it.
 
-## Open items (need the user's decision; the default is applied until decided)
+## Decided items (formerly open; closed by the user on Nov 12)
 1. **Repair writes vs held inputs.** The write path rejects held inputs, but a repair's inputs are held by its own op.
-   - Default: allow inputs held by the same `op_id` only, tested.
+   - **Decided:** keep the default. Only the op holding a record may read it as an input; every other writer stays blocked. Tested.
 2. **Step-only writes are not replayable**, so auto mode quarantines them.
-   - Default: testbed summaries and notes use `@rt.derives` inside `rt.step`, so they stay replayable.
+   - **Decided:** keep the default and document it as a limit (README "Limits"). Testbed summaries and notes use `@rt.derives` inside `rt.step`, so they stay replayable. Capturing arbitrary agent code or prompts for replay is out of scope.
 3. **Nov 22 checkpoint vs general cut order.**
-   - Default: a missed Nov 22 checkpoint cuts audit + Groq, because the dashboard isn't started yet. Every other checkpoint follows the general order.
+   - **Moot:** no checkpoint was missed and nothing was cut.
 4. **Mem0 is not on the never-cut list.**
-   - Default if the spike fails badly: two separate SimpleVectorStore instances keep the cross-store case. The Mem0 limitation is reported in RESULTS.
+   - **Moot:** the Mem0 spike passed, and Mem0 runs as the research tier in integration tests. The fallback was never needed.
 5. **The committed `experiments/cache/`** holds Groq outputs on synthetic data only, plus metadata. No keys or headers.
-   - Default: commit it.
+   - **Done:** committed (423 responses), and checked for keys and auth headers before each commit.

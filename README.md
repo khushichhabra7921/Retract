@@ -133,6 +133,7 @@ FakeLLM, 30 paired test seeds, two scenarios. Details, intervals and methods are
 - **Coverage:** only reads and writes through the SDK are tracked and guarded (L3). Anything else is invisible.
 - **Physical erasure** is not established (L4/L5). Quarantined content stays in its store by design.
 - **The runtime check is a heuristic** (sentence match plus a hashed bag-of-words embedding). It misses paraphrases.
+- **Only `@rt.derives` writes can be rebuilt.** A record written in `rt.step` without a registered function cannot be replayed, so `auto` mode quarantines it.
 - **Re-derivation** replays old inputs minus the retracted ones. It does not re-run retrieval, so repaired memory can differ from a clean history.
 - **Concurrency:** one retraction executes at a time (a durable lease lock).
 - **Receipts:** anyone with database write access *and* the signing key can rewrite history.
