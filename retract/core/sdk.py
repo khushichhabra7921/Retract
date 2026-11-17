@@ -14,10 +14,10 @@ from typing import Literal, overload
 from retract.core.engine import Engine
 from retract.core.errors import InputNotReadableError, RetractError, UnknownTierError
 from retract.core.interfaces import MemoryAdapter
-from retract.core.lineage import LineageStore
+from retract.core.lineage import LineageStore, Query
 from retract.core.models import Mode, OrphanReport, Plan, Record
 from retract.core.operations import Journal
-from retract.core.verification import SIMILARITY_THRESHOLD, Embed
+from retract.core.verification import NOVEL_TOKENS, SIMILARITY_THRESHOLD, Embed
 from retract.derive.fakes import FakeEmbedder
 from retract.receipts import receipt as receipts
 
@@ -29,6 +29,7 @@ class Registered:
     fn: DeriveFn
     version: str
     replayable: bool
+    refetch: bool = False  # repair re-runs the step's logged searches instead of only replaying
 
 
 @dataclass
@@ -37,6 +38,7 @@ class _Step:
     agent: str
     tier: str
     reads: dict[str, None] = field(default_factory=dict)  # ordered set: read order
+    queries: list[Query] = field(default_factory=list)  # guarded searches, in call order
 
 
 _STEP: ContextVar[_Step | None] = ContextVar("retract_step", default=None)
@@ -51,6 +53,7 @@ class Retract:
         embed: Embed | None = None,
         lease_seconds: float = 60.0,
         similarity_threshold: float = SIMILARITY_THRESHOLD,
+        novel_tokens: int = NOVEL_TOKENS,
     ) -> None:
         key = os.environ.get("RETRACT_PSEUDONYM_KEY")
         if not key:
@@ -60,7 +63,9 @@ class Retract:
         self.registry: dict[str, Registered] = {}
         self.owner_token = uuid.uuid4().hex  # identifies this process as an op lease owner
         self.journal = Journal(self.lineage, self.owner_token, lease_seconds)
-        self.engine = Engine(self, self.journal, embed or FakeEmbedder(), similarity_threshold)
+        self.engine = Engine(
+            self, self.journal, embed or FakeEmbedder(), similarity_threshold, novel_tokens
+        )
 
     def close(self) -> None:
         self.lineage.close()
@@ -88,15 +93,21 @@ class Retract:
         tier: str | None = None,
         version: str = "1",
         replayable: bool = True,
+        refetch: bool = False,
     ) -> Callable[[DeriveFn], Callable[..., Record]]:
         """Register `fn(inputs: list[Record]) -> str`. Calling the result with
-        `inputs=[...]` (and optional extra `sources=[...]`) writes the derived record."""
+        `inputs=[...]` (and optional extra `sources=[...]`) writes the derived record.
+
+        `refetch=True`: writes inside `rt.step` keep the step's guarded searches. A repair
+        re-runs each search whose results fed a now-invalid input and uses the fresh results,
+        so the record is rebuilt from what retrieval would return today, not just from its old
+        inputs minus the retracted ones. Without logged searches, repair replays as usual."""
 
         def register(fn: DeriveFn) -> Callable[..., Record]:
             name = op or fn.__qualname__
             if name in self.registry:
                 raise ValueError(f"derive op {name!r} is already registered")
-            self.registry[name] = Registered(fn, version, replayable)
+            self.registry[name] = Registered(fn, version, replayable, refetch)
 
             def derive(inputs: Sequence[Record | str] = (), sources: Sequence[str] = ()) -> Record:
                 ids = [x if isinstance(x, str) else x.record_id for x in inputs]
@@ -123,8 +134,11 @@ class Retract:
     ) -> Record:
         store = self._store(tier)
         parents = [(p, "input") for p in dict.fromkeys(inputs)]
+        queries: list[Query] = []
         if step := self._current_step():
             parents += [(p, "read") for p in step.reads if p not in set(inputs)]
+            reg = self.registry.get(fn_op or "")
+            queries = step.queries if reg is not None and reg.refetch else []
         record_id = uuid.uuid4().hex
         token = f"write:{record_id}"
         # 1. Journal a pending row (rejects unreadable parents). 2. Adapter write. 3. Activate.
@@ -138,6 +152,7 @@ class Retract:
             parents=parents,
             fn_op=fn_op,
             fn_version=fn_version,
+            queries=queries,
         )
         adapter_record_id = store.write(content, {"retract_token": token, "record_id": record_id})
         self.lineage.activate(record_id, adapter_record_id)
@@ -154,6 +169,8 @@ class Retract:
     def search(self, query: str, *, tier: str, k: int = 5) -> list[Record]:
         results = self.guarded_search(query, tier=tier, k=k)
         self._note_reads(results)
+        if step := self._current_step():
+            step.queries.append((query, tier, k, [r.record_id for r in results]))
         return results
 
     def guarded_search(self, query: str, *, tier: str, k: int = 5) -> list[Record]:

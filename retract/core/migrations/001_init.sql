@@ -29,6 +29,19 @@ CREATE TABLE edges (
 );
 CREATE INDEX edges_parent ON edges (parent_id);
 
+-- Retrieval behind a refetch-enabled derive (@rt.derives(refetch=True)): the guarded searches of
+-- its rt.step, in call order. Repair re-runs a query whose results fed a now-invalid input.
+-- query may name a person, so rows are deleted when their record is purged.
+CREATE TABLE record_queries (
+    record_id  TEXT NOT NULL REFERENCES records (record_id),
+    position   INTEGER NOT NULL,
+    query      TEXT NOT NULL,
+    tier       TEXT NOT NULL,
+    k          INTEGER NOT NULL,
+    result_ids TEXT NOT NULL,  -- JSON list of record_ids, best first
+    PRIMARY KEY (record_id, position)
+);
+
 -- Ownership on primary records; extra source material on derived records.
 CREATE TABLE explicit_sources (
     record_id TEXT NOT NULL REFERENCES records (record_id),

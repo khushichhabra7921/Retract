@@ -11,6 +11,7 @@ With a ResponseCache, every request is looked up first and every live response i
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections.abc import Callable, Sequence
 
@@ -115,7 +116,9 @@ class GroqLLM:
                 if k in ("prompt_tokens", "completion_tokens", "total_tokens")
             }
             self.tokens += usage.get("total_tokens", 0)
-            return str(data["choices"][0]["message"]["content"]).strip(), usage
+            text = str(data["choices"][0]["message"]["content"])
+            # Reasoning models may inline their reasoning; keep only the answer.
+            return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip(), usage
         raise AssertionError("unreachable")
 
 

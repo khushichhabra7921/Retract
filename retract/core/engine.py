@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -22,7 +22,7 @@ from retract.core.errors import (
     StructuralVerificationError,
     TransientError,
 )
-from retract.core.lineage import Node
+from retract.core.lineage import Node, Query
 from retract.core.models import Mode, Plan, PlannedAction, Status
 from retract.core.operations import Action, Journal
 from retract.core.verification import Embed, forbidden_facts
@@ -43,12 +43,15 @@ def _closure_hash(ids: Iterable[str]) -> str:
 
 
 class Engine:
-    def __init__(self, rt: Retract, journal: Journal, embed: Embed, threshold: float) -> None:
+    def __init__(
+        self, rt: Retract, journal: Journal, embed: Embed, threshold: float, novel_tokens: int
+    ) -> None:
         self.rt = rt
         self.lineage = rt.lineage
         self.journal = journal
         self.embed = embed
         self.threshold = threshold
+        self.novel_tokens = novel_tokens
 
     # -- PLAN -------------------------------------------------------------------------------
 
@@ -140,8 +143,43 @@ class Engine:
             return "delete", "delete_mode"
         if not any(kind == "input" and valid(p) for p, kind, _ in n.parents):
             return "quarantine", "no_valid_explicit_inputs"
-        why = self._unreplayable(n)
-        return ("quarantine", why) if why else ("rederive", "replayable")
+        if why := self._unreplayable(n):
+            return "quarantine", why
+        return "rederive", "refetch" if self.rt.registry[n.fn_op or ""].refetch else "replayable"
+
+    def _refetch(
+        self, explicit: Sequence[tuple[str, str | None]], logged: Sequence[Query]
+    ) -> tuple[list[str], list[Query]]:
+        """Inputs rebuilt from retrieval: each logged search whose results fed a now-invalid
+        input runs again (guarded, so held and retracted records are skipped), and its fresh
+        results take that block's place, as many as it supplied before. Other inputs replay.
+
+        shortcut: records of this closure not yet repaired are held, so a re-run search skips
+        them; upgrade by repairing in an order that makes them visible first."""
+        origin: dict[str, int] = {}
+        for qi, (_, _, _, ids) in enumerate(logged):
+            for i in ids:
+                origin.setdefault(i, qi)
+        affected = {origin[o] for o, n in explicit if n is None and o in origin}
+        rename = {o: n for o, n in explicit if n}
+        fresh: dict[int, list[str]] = {}
+        inputs: list[str] = []
+        for o, n in explicit:
+            src = origin.get(o)
+            if src is None or src not in affected:
+                if n:
+                    inputs.append(n)
+            elif (qi := src) not in fresh:
+                query, tier, k, _ = logged[qi]
+                used = sum(1 for oo, _ in explicit if origin.get(oo) == qi)
+                hits = self.rt.guarded_search(query, tier=tier, k=k)
+                fresh[qi] = [r.record_id for r in hits][:used]
+                inputs += fresh[qi]
+        queries = [
+            (q, t, k, fresh.get(qi, [rename.get(i, i) for i in ids]))
+            for qi, (q, t, k, ids) in enumerate(logged)
+        ]
+        return list(dict.fromkeys(inputs)), queries
 
     def _unreplayable(self, n: Node) -> str | None:
         reg = self.rt.registry.get(n.fn_op) if n.fn_op else None
@@ -268,16 +306,26 @@ class Engine:
         self, op_id: str, a: Action, actions: Mapping[str, Action], retracted: list[str]
     ) -> None:
         old = self.lineage.nodes([a.record_id])[a.record_id]
-        inputs: list[str] = []
+        explicit: list[tuple[str, str | None]] = []  # (old input, its valid id now or None)
         for p, kind, _ in old.parents:
             if kind != "input":
                 continue  # replay uses explicit inputs only, in stored position order
             pa = actions.get(p)
-            if pa is not None:
-                if pa.effect == "rederived" and pa.new_record_id:
-                    inputs.append(pa.new_record_id)  # a failed or unverified parent is dropped
-            elif self.lineage.records([p], readable_only=True):
-                inputs.append(p)
+            if pa is not None:  # a failed or unverified parent is dropped
+                ok = pa.effect == "rederived" and pa.new_record_id
+                explicit.append((p, pa.new_record_id if ok else None))
+            else:
+                explicit.append((p, p if self.lineage.records([p], readable_only=True) else None))
+        inputs = [n for _, n in explicit if n]
+        queries: list[Query] = []
+        existing = (
+            self.lineage.nodes([a.new_record_id]).get(a.new_record_id) if a.new_record_id else None
+        )
+        if existing is not None:  # resumed after the write: keep the inputs it was built from
+            inputs = [p for p, kind, _ in existing.parents if kind == "input"]
+        elif (reg0 := self.rt.registry.get(old.fn_op or "")) and reg0.refetch:
+            if logged := self.lineage.queries(old.record_id):
+                inputs, queries = self._refetch(explicit, logged)
         if not inputs:
             return self._quarantine(op_id, old.record_id, "no_valid_inputs_at_execution")
         if why := self._unreplayable(old):
@@ -315,6 +363,7 @@ class Engine:
                 fn_version=old.fn_version,
                 hold_op_id=op_id,  # held until the post-repair check passes
                 supersedes=old.record_id,
+                queries=queries,
             )
             new = self.lineage.nodes([new_id])[new_id]
         content = new.content or ""
@@ -328,7 +377,7 @@ class Engine:
 
         supported = [r.content for r in self.lineage.records(inputs).values() if r.content]
         if new.status == "quarantined" or forbidden_facts(
-            content, retracted, supported, self.embed, self.threshold
+            content, retracted, supported, self.embed, self.threshold, self.novel_tokens
         ):
             self.lineage.set_status(new_id, "quarantined")
             effect, detail = "replacement_quarantined", "repair_unverified"
@@ -415,6 +464,7 @@ class Engine:
                 self.lineage.independent_primaries(source),
                 self.embed,
                 self.threshold,
+                self.novel_tokens,
             )
         else:
             retrieval = {"status": "not_run", "reason": "retracted content already purged"}

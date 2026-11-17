@@ -581,6 +581,35 @@ Never cut: experiments, receipts, recovery, probes.
 - **Tests.** `tests/test_dashboard.py` (TestClient) covers every page, 404s, CSRF rejection on both POSTs, the blocked → resume → stale re-preview → completed flow, and receipt JSON without raw content. The flow was also checked by hand in a browser.
 - **Make and CI.** Every Makefile recipe names its extras (`uv run --extra ...`), so it works from a clean clone; `uv run` only adds packages and never removes any. CI syncs `--extra dashboard` too.
 
+**M9 decisions: leak rule, refetch, baselines, wrong_user (Nov 17; the user may overrule any):**
+- **Novel-token rule** (`verification.py`):
+  - A retracted sentence's distinctive tokens (3+ letters or containing a digit, minus function words) that occur in no valid input are information only the source supplied. A replacement sentence carrying `NOVEL_TOKENS` of them, or all if fewer, is a forbidden fact.
+  - It is OR-ed with the similarity rule, and the residue probes use it too.
+  - `Retract(novel_tokens=...)`, with 0 turning it off, is threaded through the engine and the probes the same way as the threshold.
+- **Tuning:** `--tune novel` on dev seeds 0–9 over all three scenarios, with the rule fixed before the sweep (lowest error; ties to the larger *m*, since FakeLLM cannot show false alarms). It picked *m* = 2 (FN 657 → 0, FP 0); see `tuning_novel.json`. `--tune threshold` reproduces `tuning.json` with the novel rule off.
+- **Refetch repair:**
+  - **Opt-in:** `@rt.derives(..., refetch=True)`. Writes inside `rt.step` persist the step's guarded searches in `record_queries` (query, tier, k, result ids). That table is added to `001_init.sql`, which is allowed because no database has shipped.
+  - **Repair:** each logged search whose results fed a now-invalid input runs again through guarded search, without joining a read-set. Its fresh results replace that block, as many as it supplied before; everything else replays.
+  - **Plan reason:** `refetch`.
+  - **Resume:** a resumed replacement keeps the inputs it was journaled with.
+  - **Privacy:** query logs are deleted with their record at purge, because a query can name a person.
+  - **Shortcut:** closure records not yet repaired are held, so re-run searches skip them.
+- **Baselines and scenario:**
+  - `refcount_remove` models the memory side of [4] (reference counting, store deletion as a blocklist).
+  - `wrong_user`: a `tool:crm_sync` source writes 3 wrong billing contacts into customers' support memory. It is experiments-only (`EXP_SCENARIOS`); the testbed CLI keeps two scenarios.
+  - Groq runs and `--estimate` cover all three scenarios.
+- **Groq harness:**
+  - A non-default `--model` writes to `experiments/results/groq-<model>`.
+  - Responses have any `<think>…</think>` block stripped client-side, so request bodies, and with them the cache keys, are unchanged.
+  - Estimate: about 548 requests per seed, about 300K tokens.
+  - **Second model:** `qwen/qwen3.8-27b` (preview on Groq, Nov 17) for family diversity, or `openai/gpt-oss-20b`. The user chooses.
+- **Results (test seeds 10–39):** RESULTS 6.4–6.8. In short:
+  - the novel-token rule catches every paraphrase;
+  - refetch closes the clean-world gap (−54.5 → −1.1 on poisoned_doc);
+  - `refcount_remove` equals naive delete in 90/90 trials;
+  - wrong_user ends with residue 0/30.
+- **Real-model false alarms:** replaying the committed Groq `auto` runs under the new rule gave 0 false alarms on 54 replacements and no cache misses. The full Groq results predate M9 and need a live re-run.
+
 **M6 decisions (the user may overrule any):**
 - **Entry points:** `retract audit <path>...` (`[project.scripts]`, or `python -m retract.cli audit`). The code is in `retract/audit.py`, stdlib `ast` and `tomllib` only.
 - **What is flagged:** a call to `.add/.upsert/.put/.add_texts/.add_documents` on a value bound to a known memory client. On Retract's own adapters, `.write` is flagged too, because it skips lineage and the guard.

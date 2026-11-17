@@ -61,12 +61,17 @@ def _append(path: Path, row: dict[str, Any]) -> None:
 
 class Testbed:
     def __init__(
-        self, rt: Retract, llm: LLM, logs: Logs, facts: Sequence[Fact] = ALL_FACTS
+        self,
+        rt: Retract,
+        llm: LLM,
+        logs: Logs,
+        facts: Sequence[Fact] = ALL_FACTS,
+        refetch: bool = False,
     ) -> None:
         self.rt, self.llm, self.logs, self.facts = rt, llm, logs, facts
 
         def derive(op: str, agent: str, tier: str, prefix: str) -> Callable[..., Record]:
-            return rt.derives(op, agent=agent, tier=tier)(
+            return rt.derives(op, agent=agent, tier=tier, refetch=refetch)(
                 lambda inputs: prefix + llm.summarize([r.content or "" for r in inputs])
             )
 
@@ -84,9 +89,9 @@ class Testbed:
         self.graph = g.compile()
 
     def ingest(self) -> None:
-        """Customer facts into support's memory; docs into the shared knowledge base."""
+        """Customer facts (and CRM-sync tool writes) into support's memory; docs into the KB."""
         for f in self.facts:
-            agent, tier = ("support", SUPPORT) if f.kind == "user" else ("kb", KB)
+            agent, tier = ("support", SUPPORT) if f.kind in ("user", "tool") else ("kb", KB)
             self.logs.memory(agent, "write", [
                 self.rt.add(f.text, agent=agent, tier=tier, sources=[f.source])
             ])  # fmt: skip

@@ -134,3 +134,8 @@ def test_token_usage_is_counted_and_cached(monkeypatch, tmp_path):
     assert llm.tokens == 70
     entry = json.loads((tmp_path / "c.jsonl").read_text(encoding="utf-8"))
     assert entry["usage"] == {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70}
+
+
+def test_inline_reasoning_is_stripped(monkeypatch):
+    llm, _, _ = groq(monkeypatch, [ok("<think>Priya is the user.\nCheck facts.</think>Answer.")])
+    assert llm.answer("q", ["c"]) == "Answer."

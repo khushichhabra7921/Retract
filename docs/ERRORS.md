@@ -244,3 +244,29 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 
 ### 53. Ruff `E501` in a dashboard template line
 - **Fix:** wrapped the line. The HTML output is unchanged.
+
+## M9 (novel-token check, refetch repair, baselines, wrong_user)
+
+### 54. `ruff`: "Failed to parse retract/core/sdk.py: Expected a statement"
+- **Cause:** a scripted patch replaced the `Engine(...)` call using a regex that matched up to the first closing parenthesis. That was the one inside `FakeEmbedder()`, so a stray `), similarity_threshold)` was left behind.
+- **Fix:** removed the leftover with the editor tool. Scripted edits should not use paren-matching regexes on calls with nested parentheses.
+
+### 55. Shell-embedded patch to `experiments/run.py` failed on a newline escape
+- **Cause:** entry 31 again. The `--tune` block contains a newline escape, and the doubled backslash reached Python as a single one.
+- **Fix:** nothing was written, because the patch asserts every pair first. The backslash-free parts went through the script and the `--tune` block through the editor.
+
+### 56. Ruff `I001` (import order of `NOVEL`) and mypy errors in `_refetch` and `_rederive`
+- **Cause:** `qi` was reassigned from `int | None` inside a loop typed `int`, and a resume lookup passed a `str | None` id.
+- **Fix:** `ruff check --fix`; a separate `src` variable with a walrus once it is known to be an int; the lookup only runs when the id is set.
+
+### 57. Refetch test fixture: search returned the wrong top 2
+- **Cause:** a test assumption, not a bug. FakeEmbedder normalizes by length, so a short "answered within two days" doc outscored both refund policies for the query.
+- **Fix:** printed the scores and replaced it with a doc that is weaker for the query (0.174 vs 0.5).
+
+### 58. `BrokenProcessPool` when running a smoke test piped through stdin
+- **Cause:** on Windows, `ProcessPoolExecutor` spawns workers that re-import `__main__`, and a script read from stdin cannot be re-imported (`OSError: Invalid argument: '<stdin>'`).
+- **Fix:** ran the smoke test from a temp script file with a `__main__` guard.
+
+### 59. Groq replay test pinned the old set of configs
+- **Cause:** `refetch` and `refcount_remove` are now Groq configs too.
+- **Fix:** the test compares against `GROQ_RUNS`.

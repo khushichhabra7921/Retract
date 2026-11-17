@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import sqlite3
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
@@ -17,6 +18,7 @@ from retract.core.models import Record, Status
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 READABLE = "status = 'active' AND hold_op_id IS NULL"  # the guard rule
+Query = tuple[str, str, int, list[str]]  # (query, tier, k, result record_ids)
 
 
 def _marks(n: int) -> str:
@@ -102,6 +104,7 @@ class LineageStore:
         fn_version: str | None,
         hold_op_id: str | None = None,
         supersedes: str | None = None,
+        queries: Sequence[Query] = (),
     ) -> None:
         """Write-path step 1, one tx: reject unreadable parents and tombstoned labels, then
         journal a pending row with its edges and effective labels.
@@ -165,6 +168,14 @@ class LineageStore:
             c.executemany(
                 "INSERT INTO labels (record_id, source_id) VALUES (?, ?)",
                 [(record_id, s) for s in labels],
+            )
+            c.executemany(
+                "INSERT INTO record_queries (record_id, position, query, tier, k, result_ids)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (record_id, i, q, t, k, json.dumps(list(ids)))
+                    for i, (q, t, k, ids) in enumerate(queries)
+                ],
             )
 
     def activate(self, record_id: str, adapter_record_id: str) -> None:
@@ -292,11 +303,21 @@ class LineageStore:
         self.conn.execute("UPDATE records SET status = ? WHERE record_id = ?", (status, record_id))
 
     def purge(self, record_id: str, status: Status) -> None:
-        """After a verified adapter purge: drop the content and set the final status."""
-        self.conn.execute(
-            "UPDATE records SET content = NULL, status = ? WHERE record_id = ?",
-            (status, record_id),
+        """After a verified adapter purge: drop the content and query log, set the final status."""
+        with self.tx() as c:
+            c.execute(
+                "UPDATE records SET content = NULL, status = ? WHERE record_id = ?",
+                (status, record_id),
+            )
+            c.execute("DELETE FROM record_queries WHERE record_id = ?", (record_id,))
+
+    def queries(self, record_id: str) -> list[Query]:
+        rows = self.conn.execute(
+            "SELECT query, tier, k, result_ids FROM record_queries WHERE record_id = ?"
+            " ORDER BY position",
+            (record_id,),
         )
+        return [(q, t, k, json.loads(ids)) for q, t, k, ids in rows]
 
     def clear_hold(self, record_id: str) -> None:
         self.conn.execute("UPDATE records SET hold_op_id = NULL WHERE record_id = ?", (record_id,))

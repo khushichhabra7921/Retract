@@ -11,7 +11,13 @@ from collections.abc import Sequence
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
-from retract.core.verification import SIMILARITY_THRESHOLD, Embed, forbidden_facts, sentences
+from retract.core.verification import (
+    NOVEL_TOKENS,
+    SIMILARITY_THRESHOLD,
+    Embed,
+    forbidden_facts,
+    sentences,
+)
 
 if TYPE_CHECKING:
     from retract.core.sdk import Retract
@@ -43,6 +49,7 @@ def measure(
     supported: Sequence[str],
     embed: Embed,
     threshold: float = SIMILARITY_THRESHOLD,
+    novel_tokens: int = NOVEL_TOKENS,
 ) -> dict[str, Any]:
     """Run every probe through guarded `rt.search` and each adapter's raw `search`.
 
@@ -54,7 +61,7 @@ def measure(
 
     @cache  # the same items come back for many probes; check each once
     def leaks(content: str | None) -> bool:
-        found = forbidden_facts(content or "", retracted, supported, embed, threshold)
+        found = forbidden_facts(content or "", retracted, supported, embed, threshold, novel_tokens)
         return bool(content) and bool(found)
 
     counts = dict.fromkeys(("guarded", "raw_purged", "raw_quarantined", "raw_unexpected"), 0)

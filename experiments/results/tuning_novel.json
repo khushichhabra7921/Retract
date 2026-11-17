@@ -1,0 +1,63 @@
+{
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "configs": [
+    "auto",
+    "auto_leak",
+    "auto_paraphrase"
+  ],
+  "rule": "lowest mean per-trial (FN + FP) / replacements; ties to the larger count",
+  "grid": [
+    {
+      "novel_tokens": 0,
+      "TP": 486,
+      "FP": 0,
+      "FN": 657,
+      "TN": 657,
+      "mean_trial_error": 0.3333333333333333
+    },
+    {
+      "novel_tokens": 1,
+      "TP": 972,
+      "FP": 0,
+      "FN": 0,
+      "TN": 657,
+      "mean_trial_error": 0.0
+    },
+    {
+      "novel_tokens": 2,
+      "TP": 972,
+      "FP": 0,
+      "FN": 0,
+      "TN": 657,
+      "mean_trial_error": 0.0
+    },
+    {
+      "novel_tokens": 3,
+      "TP": 929,
+      "FP": 0,
+      "FN": 44,
+      "TN": 657,
+      "mean_trial_error": 0.12490922294843862
+    },
+    {
+      "novel_tokens": 4,
+      "TP": 882,
+      "FP": 0,
+      "FN": 92,
+      "TN": 657,
+      "mean_trial_error": 0.1784126984126984
+    }
+  ],
+  "chosen": 2
+}

@@ -151,9 +151,21 @@ the same as redoing it from scratch.
    - Re-derivation diverges from the clean world.
    - Containment cascades.
 
-**Not done.** We have not compared the methods empirically on a shared benchmark. A natural next
-step is to run [25]'s poisoned and wrong-user fault types through the Retract testbed, and our
-poisoned_doc scenario through an SBU-style remove-only baseline (close to our `delete` mode).
+**Partial head-to-head (Nov 17, in our testbed; RESULTS 6.6–6.8).** These are our
+re-implementations of the core ideas, not the authors' code:
+
+- **[4]'s memory side as a baseline** (`refcount_remove`): delete the forgotten records, then every
+  artifact whose reference count drops to zero. In all 90 trials it removed exactly what naive
+  deletion removed, because every derived record mixed the target with other sources. Shared
+  artifacts kept the retracted content: residue in 30/30 trials, against 0/30 for Retract.
+- **The broader recomputation of [25]** (`refetch`): re-running the retrieval behind each affected
+  record brought repaired memory back to the clean world. The honest-mention gap fell from −54.5 to
+  −1.1. This agrees with [25]'s finding that selective replay leaves more behind than broader
+  recomputation.
+- **[25]'s fault types:** poisoned (our poisoned_doc) and wrong-user (our new wrong_user, a
+  misrouted CRM sync) now run through Retract. Stale facts and summary drift do not yet.
+
+Still not done: a comparison on a shared benchmark, or with the authors' implementations.
 
 ## Other systems in the brief (not reviewed in depth)
 

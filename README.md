@@ -38,7 +38,7 @@ Every write goes through the SDK. It records parent edges: declared `inputs=`, p
 | L4 Physically erased from vector index internals | **Not established** |
 | L5 Removed from backups / external caches / model weights | **Not established** |
 
-The post-repair check and the retrieval-residue probes are heuristics, not an oracle. They catch verbatim leaks of retracted text but missed every paraphrased leak in our experiments. A receipt's retrieval-residue `pass` therefore means no residue *the heuristic can see* ([results](docs/RESULTS.md#64-runtime-post-repair-check-under-injection)).
+The post-repair check and the retrieval-residue probes are heuristics, not an oracle. They catch verbatim leaks, and paraphrases that keep identifying details (names, codes, numbers); a paraphrase that drops all of them can pass. A receipt's retrieval-residue `pass` therefore means no residue *the heuristic can see* ([results](docs/RESULTS.md#64-runtime-post-repair-check-under-injection)).
 
 ## Quickstart
 
@@ -96,9 +96,9 @@ The dashboard binds to 127.0.0.1 only. Every state change is a POST carrying a C
 
 | Call | What it does |
 |---|---|
-| `Retract(db, stores={tier: adapter}, similarity_threshold=0.75)` | Lineage store plus one adapter per tier |
+| `Retract(db, stores={tier: adapter}, similarity_threshold=0.75, novel_tokens=2)` | Lineage store plus one adapter per tier; the two post-repair check settings, tuned on dev seeds |
 | `rt.add(text, sources=[...], agent=, tier=)` | Primary record owned by `sources` (`src.user`, `src.doc`, `src.conversation`, `src.tool`) |
-| `@rt.derives(op, agent=, tier=, version="1", replayable=True)` | Registers a derivation. Calling it with `inputs=[...]` writes a derived record with parent edges. |
+| `@rt.derives(op, agent=, tier=, version="1", replayable=True, refetch=False)` | Registers a derivation. Calling it with `inputs=[...]` writes a derived record with parent edges. With `refetch=True`, repair re-runs the step's searches instead of only replaying old inputs. |
 | `with rt.step(agent, tier):` | Guarded reads inside the step become parents of every write in it (deliberate over-approximation) |
 | `rt.search(q, tier=, k=)`, `rt.get(id)` | Guarded reads: only `active` records that no operation holds |
 | `rt.retract(source, mode="auto" \| "delete" \| "quarantine", dry_run=True)` | Plan: closure, actions, `blast_radius`, `closure_hash`. `plan.execute()` runs it and returns a receipt. |
@@ -112,37 +112,36 @@ Adapters: `SimpleVectorStore` (in memory) and `Mem0Adapter` (extra `mem0`, local
 
 ## Results at a glance
 
-FakeLLM, 30 paired test seeds, two scenarios. Details, intervals and methods are in [docs/RESULTS.md](docs/RESULTS.md).
+FakeLLM, 30 paired test seeds, three scenarios: a user deletion, a false document, and a misrouted CRM sync. Details, intervals and methods are in [docs/RESULTS.md](docs/RESULTS.md).
 
-- **Residue:** every retraction mode left 0/30 structural and guarded retrieval residue (Wilson 95% upper bound 0.114). Naive delete left residue in 30/30.
+- **Residue:** every retraction mode left 0/30 structural and guarded retrieval residue (Wilson 95% upper bound 0.114). Naive delete left residue in 30/30, and so did a remove-only baseline modeled on prior work ([4]), which removed nothing beyond the originals.
 - **What each mode keeps** (on the false-document scenario):
   - re-derivation kept 99.2% of records and all honest fact mentions;
   - delete and quarantine kept 58.1% of records and 11.5% of honest mentions.
-- **Negative results:**
-  - Paraphrased leaks evade the runtime check at every threshold tried.
-  - Re-derivation is not the counterfactual clean world: it has 54.5 fewer honest mentions than a world that never saw the bad document.
-  - On the false-document scenario, quarantine leaves 44% of guarded reads short of k.
+- **Rebuilding from fresh retrieval reaches the clean world.** Replay leaves 54.5 fewer honest mentions than a world that never saw the bad document. Refetch, which re-runs the search behind each record, closes that to 1.1 with the same LLM calls, and on the misrouted-sync scenario it restores answer quality that replay loses.
+- **Paraphrased leaks are caught.** The novel-token rule caught every injected paraphrase, up from 0%, and raised no false alarms on 54 replacements written by a hosted LLM. It relies on paraphrases keeping identifying details ([limits](docs/RESULTS.md#threats-to-validity)).
+- **Negative results:** containment cascades; quarantine leaves 44% of guarded reads short of k on the false-document scenario; repairs drop step read-set edges.
 - **Cost:**
-  - a Retract write is about 55× a raw adapter write (durable SQLite commits);
+  - a Retract write is about 40–55× a raw adapter write (durable SQLite commits);
   - a guarded read is about 1.9× a raw read;
-  - a 54-record retraction takes 1.9 s plus LLM latency.
-- **Hosted LLM** (Groq `openai/gpt-oss-120b`, 1 seed, so illustrative only): with the false policy in memory, 20/20 answers were wrong. Naive delete changed nothing, and every Retract mode restored 20/20 correct answers ([results](docs/RESULTS.md#68-hosted-llm-groq-openaigpt-oss-120b-n--1-experimentsresultsgroq)).
+  - a 54-record retraction takes about 1.4–1.9 s plus LLM latency.
+- **Hosted LLM** (Groq `openai/gpt-oss-120b`, 1 seed, so illustrative only; run before the latest changes): with the false policy in memory, 20/20 answers were wrong. Naive delete changed nothing, and every Retract mode restored 20/20 correct answers ([results](docs/RESULTS.md#611-hosted-llm-groq-openaigpt-oss-120b-n--1-experimentsresultsgroq)).
 
 ## Limits
 
 - **Coverage:** only reads and writes through the SDK are tracked and guarded (L3). Anything else is invisible.
 - **Physical erasure** is not established (L4/L5). Quarantined content stays in its store by design.
-- **The runtime check is a heuristic** (sentence match plus a hashed bag-of-words embedding). It misses paraphrases.
+- **The runtime check is a heuristic:** sentence and embedding match, plus novel tokens. It misses paraphrases that drop every identifying detail, and its false-alarm rate on real LLM output is measured on only 54 replacements.
 - **Only `@rt.derives` writes can be rebuilt.** A record written in `rt.step` without a registered function cannot be replayed, so `auto` mode quarantines it.
-- **Re-derivation** replays old inputs minus the retracted ones. It does not re-run retrieval, so repaired memory can differ from a clean history.
+- **Re-derivation by replay** uses old inputs minus the retracted ones, so repaired memory can differ from a clean history. `refetch=True` re-runs retrieval instead, but searches during repair cannot see records of the same closure that are not yet repaired.
 - **Concurrency:** one retraction executes at a time (a durable lease lock).
 - **Receipts:** anyone with database write access *and* the signing key can rewrite history.
 - **Status:** pre-alpha; APIs may change.
 
 ## Roadmap
 
-- A semantic embedder for the runtime check, re-tuned on dev seeds.
-- Hosted-LLM results with more seeds and a second model.
+- Hosted-LLM results with more seeds and a second model (the harness is ready: `--seeds N --model ...`).
+- A semantic check for paraphrases that drop identifying details, and a false-alarm measurement on real LLM output.
 - More adapters: managed vector stores and LangGraph store integration.
 - Per-closure locks for parallel retractions.
 - Cross-module dataflow in `retract audit`.

@@ -150,6 +150,23 @@ def _generate(seed: int = SEED) -> tuple[tuple[Fact, ...], tuple[Fact, ...]]:
     return tuple(personas), tuple(docs)
 
 
+SYNC = "crm_sync"  # a buggy CRM sync job: the wrong_user scenario's source (src.tool)
+SYNC_CONTACTS = ("Ptarmigan", "Shearwater", "Bobolink", "Phalarope", "Gadwall", "Wigeon")
+
+
+def misrouted(seed: int = SEED) -> tuple[Fact, ...]:
+    """Wrong-user fault: the sync wrote another account's billing contact into 3 customers'
+    memory. Each is a primary record owned by the tool, with its own marker."""
+    rng = random.Random(f"sync-{seed}")
+    names = rng.sample([n for _, n in PERSONAS], 3)
+    return tuple(
+        Fact(f"sync-{i}", SYNC, f"{n}'s billing contact was changed to {c}.", c.lower(),
+             (f"Billing for {n} now goes to {c}.", f"{c} is the new billing contact for {n}."),
+             kind="tool")
+        for i, (n, c) in enumerate(zip(names, rng.sample(SYNC_CONTACTS, 3), strict=True))
+    )  # fmt: skip
+
+
 def dataset(seed: int = SEED) -> tuple[Fact, ...]:
     """All facts for one seed. A seed changes the code words and templates of the 17 seeded
     personas and 28 KB docs; fact ids, the 3 hand-written users and both refund docs are fixed."""

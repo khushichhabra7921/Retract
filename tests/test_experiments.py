@@ -7,10 +7,18 @@ import pytest
 
 pytest.importorskip("langgraph")
 
-from experiments.configs import DEV_SEEDS, RUNS, TEST_SEEDS, THRESHOLD, run_trial  # noqa: E402
+from experiments.configs import (  # noqa: E402
+    DEV_SEEDS,
+    GROQ_RUNS,
+    NOVEL,
+    RUNS,
+    TEST_SEEDS,
+    THRESHOLD,
+    run_trial,
+)
 from experiments.cost import benchmark  # noqa: E402
 from experiments.run import check_pairing, markdown, summarize  # noqa: E402
-from retract.core.verification import SIMILARITY_THRESHOLD  # noqa: E402
+from retract.core.verification import NOVEL_TOKENS, SIMILARITY_THRESHOLD  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,6 +48,12 @@ def test_configs_behave_as_designed(rows):
     # auto rebuilds what delete throws away
     assert r["auto"]["after"]["readable_records"] > r["delete"]["after"]["readable_records"]
     assert r["auto"]["after"]["honest_mentions"] > r["delete"]["after"]["honest_mentions"]
+    # refetch also re-runs retrieval, so it comes back to the clean world; replay falls short
+    assert residue["refetch"] == 0 and r["refetch"]["op"]["outcome"] == "completed"
+    clean = r["clean"]["after"]["honest_mentions"]
+    assert r["auto"]["after"]["honest_mentions"] < r["refetch"]["after"]["honest_mentions"] == clean
+    # the remove-only baseline keeps every record that still has a retained parent
+    assert residue["refcount_remove"] > 0
 
 
 def test_pairing_and_summary(rows):
@@ -65,7 +79,8 @@ def test_injection_is_measured_against_the_oracle(rows):
     assert r["auto_leak"]["op"]["outcome"] == "contained"
     assert r["auto_leak"]["after"]["raw_items_with_target"]["not_quarantined"] == 0
     para = r["auto_paraphrase"]["op"]["runtime_check"]
-    assert para["TP"] + para["FN"] == sum(para.values()) > 0  # every replacement leaked
+    assert para["TP"] == sum(para.values()) > 0  # every leaked paraphrase caught (novel tokens)
+    assert r["auto_paraphrase"]["op"]["outcome"] == "contained"
     assert r["auto"]["op"]["runtime_check"]["FN"] == 0  # no injection, nothing to miss
     assert r["auto"]["before"] == r["auto_leak"]["before"]  # injection only during repair
 
@@ -75,6 +90,8 @@ def test_threshold_is_frozen_from_dev_tuning():
     assert tuned["seeds"] == list(DEV_SEEDS)
     assert set(tuned["seeds"]).isdisjoint(TEST_SEEDS)
     assert THRESHOLD == SIMILARITY_THRESHOLD == tuned["chosen"]
+    novel = json.loads((ROOT / "experiments/results/tuning_novel.json").read_text(encoding="utf-8"))
+    assert novel["seeds"] == list(DEV_SEEDS) and NOVEL == NOVEL_TOKENS == novel["chosen"]
 
 
 def test_cost_split_is_consistent(monkeypatch):
@@ -98,7 +115,7 @@ def test_groq_experiment_replays_without_key_or_network(tmp_path, monkeypatch):
     cache = tmp_path / "cache.jsonl"
     live_client = httpx.Client(transport=httpx.MockTransport(fake_groq))
     live = run_groq([10], cache, replay=False, client=live_client, scenarios=["priya"])
-    assert {r["config"] for r in live} == {"clean", "naive_delete", "delete", "auto", "quarantine"}
+    assert {r["config"] for r in live} == set(GROQ_RUNS)  # injection configs need FakeLLM
 
     monkeypatch.delenv("GROQ_API_KEY")
     offline = httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("network")))
@@ -107,3 +124,13 @@ def test_groq_experiment_replays_without_key_or_network(tmp_path, monkeypatch):
     s = summarize(replayed, "Groq test")
     assert "auto_leak" not in s["scenarios"]["priya"] and s["llm"] == "Groq test"
     assert "| auto | 0/1" in markdown(s)
+
+
+def test_wrong_user_scenario_retracts_the_sync_and_keeps_real_facts(tmp_path, monkeypatch):
+    monkeypatch.setenv("RETRACT_PSEUDONYM_KEY", "test-pseudonym-key")
+    monkeypatch.setenv("RETRACT_SIGNING_KEY", "test-signing-key")
+    before_after = run_trial("wrong_user", 1, "auto", tmp_path)
+    b, a = before_after["before"], before_after["after"]
+    assert b["raw_items_with_target"]["not_quarantined"] > 0  # the misrouted contacts spread
+    assert a["raw_items_with_target"]["not_quarantined"] == 0
+    assert a["useful_answers"] == b["useful_answers"]  # customers' own facts are kept

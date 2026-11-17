@@ -25,10 +25,12 @@ from typing import Any
 from experiments.configs import (
     CONFIGS,
     DEV_SEEDS,
+    EXP_SCENARIOS,
     GROQ_RUNS,
     GROQ_SEED_COUNT,
     INJECTED,
     MODES,
+    NOVEL,
     RUNS,
     TEST_SEEDS,
     THRESHOLD,
@@ -41,12 +43,13 @@ from testbed.scenarios import SCENARIOS
 
 Row = dict[str, Any]
 TUNING_GRID = tuple(round(0.40 + 0.05 * i, 2) for i in range(12))  # 0.40 .. 0.95
+NOVEL_GRID = (0, 1, 2, 3, 4)  # 0 = similarity rule only
 
 
-def _job(job: tuple[str, int, str, float]) -> Row:
-    scenario, seed, config, threshold = job
+def _job(job: tuple[str, int, str, float, int]) -> Row:
+    scenario, seed, config, threshold, novel = job
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        return run_trial(scenario, seed, config, Path(d), threshold=threshold)
+        return run_trial(scenario, seed, config, Path(d), threshold=threshold, novel_tokens=novel)
 
 
 def run_all(
@@ -54,14 +57,16 @@ def run_all(
     workers: int,
     configs: Sequence[str] = RUNS,
     thresholds: Sequence[float] = (THRESHOLD,),
-    scenarios: Sequence[str] = SCENARIOS,
+    scenarios: Sequence[str] = EXP_SCENARIOS,
+    novels: Sequence[int] = (NOVEL,),
 ) -> list[Row]:
     jobs = [
-        (sc, seed, cfg, t)
+        (sc, seed, cfg, t, m)
         for sc in scenarios
         for seed in seeds
         for cfg in configs
         for t in thresholds
+        for m in novels
     ]
     with ProcessPoolExecutor(workers) as pool:
         rows = list(pool.map(_job, jobs))
@@ -75,7 +80,7 @@ def run_groq(
     replay: bool,
     model: str | None = None,
     client: Any = None,  # an httpx.Client; tests pass one with a mock transport
-    scenarios: Sequence[str] = SCENARIOS,
+    scenarios: Sequence[str] = EXP_SCENARIOS,
 ) -> list[Row]:
     """Groq trials, serially in this process with one shared response cache: parallel appends
     would interleave, and through the cache the configs of a seed share one pre-retraction world
@@ -129,7 +134,7 @@ class _Counting(FakeLLM):
         return super().answer(question, contexts)
 
 
-def estimate(seeds: Sequence[int], scenarios: Sequence[str] = SCENARIOS) -> dict[str, float]:
+def estimate(seeds: Sequence[int], scenarios: Sequence[str] = EXP_SCENARIOS) -> dict[str, float]:
     """Distinct LLM requests per seed for the Groq configs, from a FakeLLM dry run. Approximate:
     Groq's own outputs change later prompts, but not how many requests the pipeline makes."""
     out = {}
@@ -265,13 +270,15 @@ def runtime_check(counts: list[dict[str, int]]) -> dict[str, Any]:
     return out
 
 
-def tuning(rows: list[Row]) -> dict[str, Any]:
-    """Per threshold: replacement confusion totals and the mean per-trial error rate.
-    Rule (fixed before the first sweep): lowest mean (FN + FP) / replacements; ties go to the
-    lower threshold."""
+def tuning(rows: list[Row], key: str = "threshold") -> dict[str, Any]:
+    """Per value of `key`: replacement confusion totals and the mean per-trial error rate.
+    Rules, each fixed before its first sweep: lowest mean (FN + FP) / replacements; ties go to
+    the lower threshold (flags more) or to the larger novel-token count (fewer false alarms,
+    which FakeLLM cannot measure: its summaries never add words)."""
+    default = {"threshold": THRESHOLD, "novel_tokens": NOVEL}[key]
     grid: dict[float, list[dict[str, int]]] = {}
     for r in rows:
-        grid.setdefault(r.get("threshold", THRESHOLD), []).append(r["op"]["runtime_check"])
+        grid.setdefault(r.get(key, default), []).append(r["op"]["runtime_check"])
     table = []
     for t in sorted(grid):
         totals = Counter[str]()
@@ -282,17 +289,19 @@ def tuning(rows: list[Row]) -> dict[str, Any]:
             if n:
                 errors.append((c["FN"] + c["FP"]) / n)
         table.append({
-            "threshold": t,
+            key: t,
             **{k: totals[k] for k in ("TP", "FP", "FN", "TN")},
             "mean_trial_error": sum(errors) / len(errors),
         })  # fmt: skip
-    best = min(table, key=lambda e: (e["mean_trial_error"], e["threshold"]))
+    sign = -1 if key == "novel_tokens" else 1
+    best = min(table, key=lambda e: (e["mean_trial_error"], sign * e[key]))
+    tie = "larger count" if sign < 0 else "lower threshold"
     return {
         "seeds": sorted({r["seed"] for r in rows}),
         "configs": sorted({r["config"] for r in rows}),
-        "rule": "lowest mean per-trial (FN + FP) / replacements; ties to the lower threshold",
+        "rule": f"lowest mean per-trial (FN + FP) / replacements; ties to the {tie}",
         "grid": table,
-        "chosen": best["threshold"],
+        "chosen": best[key],
     }
 
 
@@ -339,6 +348,9 @@ def _paired(rows: list[Row], scenario: str) -> dict[str, Any]:
             ("delete", "clean"),
             ("quarantine", "clean"),
             ("auto", "delete"),
+            ("refetch", "clean"),
+            ("refetch", "auto"),
+            ("refcount_remove", "clean"),
         ):
             mean, ci = paired_bootstrap_ci(value(a), value(b))
             out[f"{metric}: {a} - {b}"] = {"mean": mean, "bootstrap95": list(ci)}
@@ -371,7 +383,7 @@ def markdown(summary: dict[str, Any]) -> str:
         lines += ["", f"Runtime post-repair check vs the oracle ({sc}, replacements per config):",
                   "", "| config | TP | FP | FN | TN | trials with FN | trials with FP | FN rate"
                   " | outcomes |", "|---|---|---|---|---|---|---|---|---|"]  # fmt: skip
-        for cfg in (c for c in ("auto", *INJECTED) if c in per):
+        for cfg in (c for c in ("auto", "refetch", *INJECTED) if c in per):
             rc = per[cfg]["runtime_check"]
             n = rc["replacements"]
             lines.append(
@@ -401,7 +413,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seeds", type=int, help="first N test seeds (default: 30, Groq: 5)")
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1)
     ap.add_argument("--out", type=Path, help="default: experiments/results/<llm>")
-    ap.add_argument("--tune", action="store_true", help="sweep the threshold on dev seeds")
+    ap.add_argument("--tune", choices=("threshold", "novel"), help="sweep on the dev seeds")
     ap.add_argument("--cost-seeds", type=int, default=5, help="serial cost benchmark; 0 skips")
     ap.add_argument("--replay", action="store_true", help="Groq: cache only, no key, no network")
     ap.add_argument("--cache", type=Path, default=Path("experiments/cache/groq.jsonl"))
@@ -411,7 +423,13 @@ def main(argv: list[str] | None = None) -> int:
     groq = args.llm == "groq"
     if args.replay and not groq:
         ap.error("--replay needs --llm groq")
-    args.out = args.out or Path("experiments/results") / args.llm
+    if args.out is None:  # one results dir per LLM; a non-default Groq model gets its own
+        name = args.llm
+        if groq and args.model:
+            from retract.derive.groq import MODEL
+
+            name = "groq" if args.model == MODEL else "groq-" + args.model.replace("/", "-")
+        args.out = Path("experiments/results") / name
     args.seeds = args.seeds or (GROQ_SEED_COUNT if groq else len(TEST_SEEDS))
     for var in ("RETRACT_PSEUDONYM_KEY", "RETRACT_SIGNING_KEY"):
         if not os.environ.get(var):  # synthetic data; worker processes inherit the key
@@ -422,17 +440,22 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{sc}: ~{n:.0f} distinct requests per seed")
         total = sum(per_seed.values())
         for n in sorted({1, GROQ_SEED_COUNT, 10, 30}):
-            print(f"{n} seeds, both scenarios: ~{n * total:.0f} Groq requests (+ retries)")
+            print(f"{n} seeds, all scenarios: ~{n * total:.0f} Groq requests (+ retries)")
         return 0
     if args.tune:
         configs = ("auto", *INJECTED)
-        result = tuning(run_all(DEV_SEEDS, args.workers, configs, TUNING_GRID))
+        if args.tune == "threshold":  # rule 1 alone, as when the threshold was frozen
+            rows = run_all(DEV_SEEDS, args.workers, configs, TUNING_GRID, novels=(0,))
+            result, name = tuning(rows), "tuning.json"
+        else:
+            rows = run_all(DEV_SEEDS, args.workers, configs, novels=NOVEL_GRID)
+            result, name = tuning(rows, "novel_tokens"), "tuning_novel.json"
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        path = args.out.parent / "tuning.json"
+        path = args.out.parent / name
         path.write_bytes((json.dumps(result, indent=2) + "\n").encode())
         for e in result["grid"]:
             print(e)
-        print(f"chosen threshold: {result['chosen']} ({path})")
+        print(f"chosen: {result['chosen']} ({path})")
         return 0
     if not 0 < args.seeds <= len(TEST_SEEDS):
         ap.error(f"--seeds must be 1..{len(TEST_SEEDS)}")

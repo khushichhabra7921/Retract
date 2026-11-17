@@ -4,8 +4,12 @@ ticket order and questions; measurements use the fact oracle, which the SDK neve
 clean         the target source is never ingested: the reference world
 unretracted   the target is ingested and never removed (each retraction run's "before" state)
 naive_delete  delete the source's own primary items from their stores, bypassing Retract
+refcount_remove  remove-only baseline in the style of SBU [4]: delete the source's records and every
+              derived record whose parents are all deleted, repeatedly; shared records stay as-is
 delete        rt.retract(mode="delete"): purge the whole affected closure, rebuild nothing
 auto          rt.retract(mode="auto"): purge the source's records, re-derive the rest
+refetch       auto, with derives registered refetch=True: repair re-runs the retrieval behind a
+              record instead of replaying its old inputs minus the retracted ones
 quarantine    rt.retract(mode="quarantine"): hide the whole affected closure
 auto_leak     auto, but FakeLLM re-emits a target fact verbatim during repair (leak injection)
 auto_paraphrase  auto, but FakeLLM re-emits a paraphrase of it (paraphrase injection)
@@ -18,17 +22,18 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from retract import Retract
-from retract.core.verification import SIMILARITY_THRESHOLD
+from retract import Retract, src
+from retract.core.verification import NOVEL_TOKENS, SIMILARITY_THRESHOLD
 from retract.derive.fakes import FakeLLM
 from testbed.agents import LLM, TIERS, Logs, Testbed
-from testbed.data import PERSONAS, Fact, Oracle, confusion, dataset
-from testbed.scenarios import READABLE, exposure, make_stores, setup, spread
+from testbed.data import PERSONAS, SYNC, Fact, Oracle, confusion, dataset, misrouted
+from testbed.scenarios import READABLE, SCENARIOS, exposure, make_stores, setup, spread
 
-CONFIGS = ("clean", "unretracted", "naive_delete", "delete", "auto", "quarantine",
-           "auto_leak", "auto_paraphrase")  # fmt: skip
+CONFIGS = ("clean", "unretracted", "naive_delete", "refcount_remove", "delete", "auto",
+           "refetch", "quarantine", "auto_leak", "auto_paraphrase")  # fmt: skip
+EXP_SCENARIOS = (*SCENARIOS, "wrong_user")  # wrong_user: a [25]-style fault, experiments only
 RUNS = tuple(c for c in CONFIGS if c != "unretracted")  # unretracted = a run's before state
-MODES = {"delete": "delete", "auto": "auto", "quarantine": "quarantine",
+MODES = {"delete": "delete", "auto": "auto", "refetch": "auto", "quarantine": "quarantine",
          "auto_leak": "auto", "auto_paraphrase": "auto"}  # fmt: skip
 INJECTED = ("auto_leak", "auto_paraphrase")
 GROQ_RUNS = tuple(c for c in RUNS if c not in INJECTED)  # injection needs FakeLLM
@@ -38,6 +43,8 @@ TEST_SEEDS = range(10, 40)  # every reported result
 # Post-repair similarity threshold, tuned on DEV_SEEDS (experiments/results/tuning.json) and
 # frozen; the SDK default must match it (tested).
 THRESHOLD = SIMILARITY_THRESHOLD
+# Novel-token rule, tuned on DEV_SEEDS (experiments/results/tuning_novel.json); same freeze.
+NOVEL = NOVEL_TOKENS
 
 PRIMARIES_OF_SOURCE = (
     "SELECT r.tier, r.adapter_record_id FROM records r"
@@ -46,10 +53,20 @@ PRIMARIES_OF_SOURCE = (
 )
 
 
+def scenario_setup(scenario: str, oracle: Oracle) -> tuple[list[str], set[str], str]:
+    """testbed.scenarios.setup, plus wrong_user: retract the CRM sync that misrouted data."""
+    if scenario != "wrong_user":
+        return setup(scenario, oracle)
+    target = {f.fact_id for f in oracle.facts if f.owner == SYNC}
+    return [f"What do we know about {n}?" for _, n in PERSONAS], target, src.tool(SYNC)
+
+
 def expected_facts(scenario: str, oracle: Oracle) -> list[set[str] | None]:
     """Per question (PERSONAS order): facts a useful answer contains; None = not scored."""
     if scenario == "priya":  # the target persona's own question is excluded from utility
         return [None if p == "u_priya" else oracle.owned_by(p) for p, _ in PERSONAS]
+    if scenario == "wrong_user":
+        return [oracle.owned_by(p) for p, _ in PERSONAS]
     return [{"refund-true"} for _ in PERSONAS]
 
 
@@ -69,12 +86,13 @@ def run_trial(
     out: Path,
     llm: LLM | None = None,
     threshold: float = THRESHOLD,
+    novel_tokens: int = NOVEL,
 ) -> dict[str, Any]:
     if config not in RUNS:
         raise ValueError(f"config must be one of {RUNS}")
-    facts = dataset(seed)
+    facts = dataset(seed) + (misrouted(seed) if scenario == "wrong_user" else ())
     oracle = Oracle(facts)
-    questions, target, source = setup(scenario, oracle)
+    questions, target, source = scenario_setup(scenario, oracle)
     probes = [t for f in facts if f.fact_id in target for t in (f.text, *f.paraphrases)]
     expected = expected_facts(scenario, oracle)
     ingest: tuple[Fact, ...] = facts
@@ -85,9 +103,14 @@ def run_trial(
 
     out.mkdir(parents=True, exist_ok=True)
     stores = make_stores(out, "simple")
-    rt = Retract(out / "lineage.db", stores=stores, similarity_threshold=threshold)
+    rt = Retract(
+        out / "lineage.db",
+        stores=stores,
+        similarity_threshold=threshold,
+        novel_tokens=novel_tokens,
+    )
     try:
-        tb = Testbed(rt, llm, Logs(out), facts=ingest)
+        tb = Testbed(rt, llm, Logs(out), facts=ingest, refetch=config == "refetch")
         tb.ingest()
         for i in order:
             persona, name = PERSONAS[i]
@@ -99,6 +122,8 @@ def run_trial(
         row: dict[str, Any] = {"scenario": scenario, "seed": seed, "config": config}
         if threshold != THRESHOLD:
             row["threshold"] = threshold
+        if novel_tokens != NOVEL:
+            row["novel_tokens"] = novel_tokens
         staged = scenario == "poisoned_doc"
         if config == "clean":
             row["after"] = measure()
@@ -111,6 +136,8 @@ def run_trial(
             for tier, adapter_id in primaries:
                 rt.stores[tier].delete(adapter_id)
             row["op"] = {"deleted": len(primaries)}
+        elif config == "refcount_remove":
+            row["op"] = {"deleted": _refcount_remove(rt, source)}
         else:
             inject = injection(config, seed, facts, target)
             if inject is not None and not isinstance(llm, FakeLLM):
@@ -160,6 +187,28 @@ def _retract(
         ),
         "runtime_check": _runtime_check(rt, list(closure), target, oracle),
     }
+
+
+def _refcount_remove(rt: Retract, source: str) -> int:
+    """Memory side of SBU [4]: forget the source's records, then every derived record whose
+    reference count drops to zero (all parents forgotten), repeatedly. Records that still have a
+    retained parent are kept unchanged, so they keep whatever they copied from the source.
+    Deleted from the stores directly: guarded reads skip them, as a retrieval blocklist would."""
+    conn = rt.lineage.conn
+    q = "SELECT record_id FROM explicit_sources WHERE source_id = ?"
+    removed = {r[0] for r in conn.execute(q, (source,))}
+    parents: dict[str, set[str]] = {}
+    for child, parent in conn.execute("SELECT child_id, parent_id FROM edges"):
+        parents.setdefault(child, set()).add(parent)
+    while new := {c for c, ps in parents.items() if c not in removed and ps <= removed}:
+        removed |= new
+    for rid in removed:
+        row = conn.execute(
+            "SELECT tier, adapter_record_id FROM records WHERE record_id = ?", (rid,)
+        ).fetchone()
+        if row and row[1]:
+            rt.stores[row[0]].delete(row[1])
+    return len(removed)
 
 
 def _requests(llm: LLM) -> int:

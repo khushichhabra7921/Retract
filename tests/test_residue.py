@@ -84,11 +84,28 @@ def test_verbatim_leak_is_a_true_positive(rt, world, llm):
     assert "priya-1" not in readable_facts(rt)  # contained
 
 
-def test_planted_paraphrase_miss_is_measured_as_false_negative(rt, world, llm):
+@pytest.mark.parametrize(("novel_tokens", "label"), [(0, "FN"), (2, "TP")])
+def test_planted_paraphrase_needs_the_novel_token_rule(rt, world, llm, novel_tokens, label):
     llm.inject = FACT["priya-1"].paraphrases[0]  # same fact, different words
+    rt.engine.novel_tokens = novel_tokens  # 0 = similarity rule only, which misses paraphrases
     receipt = rt.retract(PRIYA)
-    assert confusion(runtime_flagged(receipt), "priya-1" in replacement_facts(rt)) == "FN"
-    assert "priya-1" in readable_facts(rt)  # the known limit of the runtime heuristic
+    assert confusion(runtime_flagged(receipt), "priya-1" in replacement_facts(rt)) == label
+    assert ("priya-1" in readable_facts(rt)) == (label == "FN")  # caught leaks are contained
+
+
+def test_novel_tokens_ignore_lookalike_inputs_and_shared_words():
+    from retract.core.verification import forbidden_facts
+
+    false = "Refund policy RP-90: refunds are accepted within 90 days of purchase."
+    true = "Refund policy RP-30: refunds are accepted within 30 days of purchase."
+    para = "Under RP-90, customers may get a refund up to 90 days after buying."
+    embed = FakeEmbedder()
+    assert forbidden_facts(f"Brief: {para}", [false], [true], embed)  # only "90" is novel
+    assert not forbidden_facts(f"Brief: {true}", [false], [true], embed)  # honest look-alike
+    # A sentence sharing only one of several novel tokens is not enough on its own.
+    assert not forbidden_facts(
+        "Arjun prefers email.", ["Priya prefers WhatsApp for follow-ups."], [], embed
+    )
 
 
 def test_clean_retraction_is_a_true_negative(rt, world):
