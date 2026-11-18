@@ -19,6 +19,9 @@ embed = ["fastembed"]
 mem0 = ["mem0ai==2.2.1"]
 testbed = ["langgraph"]
 dashboard = ["fastapi", "jinja2", "uvicorn", "python-multipart"]
+postgres = [
+    "psycopg[binary]>=3.2",
+]
 
 [dependency-groups]
 dev = ["pytest", "pytest-cov", "ruff", "mypy", "httpx"]

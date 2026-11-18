@@ -93,9 +93,9 @@ def test_tombstoned_write_is_rejected(rt):
     add(rt, "Arjun's renewal is due in March.", "u_arjun")  # other sources unaffected
 
 
-def test_guard_sees_fresh_state_right_after_revocation(rt, tmp_path):
+def test_guard_sees_fresh_state_right_after_revocation(rt, db):
     p = add(rt, "Priya prefers WhatsApp for follow-ups.")
-    reader = Retract(tmp_path / "lineage.db", stores=rt.stores)  # separate connection
+    reader = Retract(db, stores=rt.stores)  # separate connection
     try:
         assert reader.get(p.record_id) is not None
         assert [r.record_id for r in reader.search("whatsapp", tier="private:support")] == [
@@ -109,9 +109,9 @@ def test_guard_sees_fresh_state_right_after_revocation(rt, tmp_path):
         reader.close()
 
 
-def test_write_racing_block_loses_when_block_commits_first(rt, tmp_path):
+def test_write_racing_block_loses_when_block_commits_first(rt, db):
     p = add(rt, "Priya prefers WhatsApp.")
-    other = Retract(tmp_path / "lineage.db", stores=rt.stores)
+    other = Retract(db, stores=rt.stores)
 
     @rt.derives("racy", agent="support", tier="shared")
     def racy(inputs):
@@ -125,9 +125,9 @@ def test_write_racing_block_loses_when_block_commits_first(rt, tmp_path):
     other.close()
 
 
-def test_write_racing_block_is_held_when_its_row_commits_first(rt, tmp_path, monkeypatch):
+def test_write_racing_block_is_held_when_its_row_commits_first(rt, db, monkeypatch):
     p = add(rt, "Priya prefers WhatsApp.")
-    other = Retract(tmp_path / "lineage.db", stores=rt.stores)
+    other = Retract(db, stores=rt.stores)
     real_write = rt.stores["shared"].write
     blocked = {}
 
@@ -142,13 +142,13 @@ def test_write_racing_block_is_held_when_its_row_commits_first(rt, tmp_path, mon
     other.close()
 
 
-def test_threaded_writes_racing_block_are_never_missed(rt, tmp_path):
+def test_threaded_writes_racing_block_are_never_missed(rt, db):
     p = add(rt, "Priya prefers WhatsApp.")
     derive = concat(rt)
     warmed, stop, done, rejected = threading.Event(), threading.Event(), [], []
 
     def writer():
-        w = Retract(tmp_path / "lineage.db", stores=rt.stores)
+        w = Retract(db, stores=rt.stores)
         wd = w.derives("w", agent="support", tier="shared")(lambda ins: "S " + ins[0].content)
         for _ in range(100_000):  # until BLOCK has rejected a few writes
             if len(rejected) >= 3 or stop.is_set():

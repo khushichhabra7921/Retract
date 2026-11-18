@@ -11,12 +11,12 @@ import hashlib
 import hmac
 import json
 import os
-import sqlite3
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from retract.core.errors import RetractError
+from retract.core.lineage import Conn
 
 GENESIS = "0" * 64
 
@@ -75,7 +75,7 @@ class Receipt(BaseModel):
     body: dict[str, Any]
     hash: str
     signature: str
-    _conn: sqlite3.Connection | None = PrivateAttr(default=None)
+    _conn: Conn | None = PrivateAttr(default=None)
 
     @property
     def op_id(self) -> str:
@@ -119,7 +119,7 @@ class Receipt(BaseModel):
         )
 
 
-def load(conn: sqlite3.Connection, op_id: str) -> Receipt | None:
+def load(conn: Conn, op_id: str) -> Receipt | None:
     row = conn.execute("SELECT body, hash, signature FROM receipts WHERE op_id = ?", (op_id,))
     found = row.fetchone()
     if not found:
@@ -129,7 +129,7 @@ def load(conn: sqlite3.Connection, op_id: str) -> Receipt | None:
     return receipt
 
 
-def append(conn: sqlite3.Connection, body: dict[str, Any]) -> Receipt:
+def append(conn: Conn, body: dict[str, Any]) -> Receipt:
     """Call inside the FINALIZE tx. Fills seq and prev_hash."""
     last = conn.execute("SELECT seq, hash FROM receipts ORDER BY seq DESC LIMIT 1").fetchone()
     body = {**body, "seq": (last[0] + 1) if last else 1, "prev_hash": last[1] if last else GENESIS}
@@ -143,7 +143,7 @@ def append(conn: sqlite3.Connection, body: dict[str, Any]) -> Receipt:
     return receipt
 
 
-def verify_chain(conn: sqlite3.Connection) -> ChainReport:
+def verify_chain(conn: Conn) -> ChainReport:
     key = signing_key()
     problems: list[str] = []
     prev_hash = GENESIS

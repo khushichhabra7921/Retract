@@ -199,8 +199,7 @@ class Engine:
         receipts.signing_key()  # fail before anything is blocked
         op_id = uuid.uuid4().hex
         with self.lineage.tx():
-            if live := self.journal.live_executing():
-                raise OperationInProgressError(live)
+            self.lineage.lock([source])  # serializes with racing writes carrying its label
             if self.journal.op_for_source(plan.source_ref) is not None:
                 raise StalePlanError("the source was retracted after the preview")
             nodes = self._live_closure(source)
@@ -210,7 +209,7 @@ class Engine:
                 )
             if foreign := sorted({n.hold_op_id for n in nodes.values() if n.hold_op_id}):
                 raise OperationInProgressError(foreign[0], "holding records this retraction needs")
-            self.lineage.tombstone_and_hold(source, op_id, nodes)
+            self.lineage.tombstone_and_hold(source, op_id, nodes)  # atomic: the closure lock
             self.journal.create(
                 op_id,
                 plan.source_ref,
@@ -426,15 +425,23 @@ class Engine:
         ours = set(nodes) | {a.new_record_id for a in actions if a.new_record_id}
         orphans = self.rt.orphan_scan()
         pending = orphans.pending_no_adapter_record + orphans.pending_adapter_written
+        # A pending replacement held by another op is that op's in-flight write: its own
+        # repair or resume reconciles it, so it is not an orphan here.
+        unrelated = [
+            i
+            for i, n in self.lineage.nodes(set(pending) - ours).items()
+            if n.hold_op_id in (None, op_id)
+        ]
         stray_ours: list[str] = []
         stray_other: list[str] = []
         for tier, adapter_id in orphans.adapter_no_lineage:
             item = self.rt._store(tier).get(adapter_id)
             meta = item.metadata if item else {}
-            mine = meta.get("record_id") in ours or meta.get("retract_token", "").startswith(
-                f"{op_id}:"
-            )
-            (stray_ours if mine else stray_other).append(adapter_id)
+            owner = meta.get("retract_token", "").partition(":")[0]
+            if meta.get("record_id") in ours or owner == op_id:
+                stray_ours.append(adapter_id)
+            elif not self._in_flight(owner):
+                stray_other.append(adapter_id)
         groups = {
             "source": {
                 "all_actions_done": all(a.state == "done" for a in actions),
@@ -452,7 +459,7 @@ class Engine:
                 "no_readable_record_has_unreadable_input": (
                     not self.lineage.readable_with_unreadable_parent()
                 ),
-                "no_unrelated_orphans": not (set(pending) - ours) and not stray_other,
+                "no_unrelated_orphans": not unrelated and not stray_other,
             },
         }
         if probes:
@@ -486,6 +493,11 @@ class Engine:
             },
             "retrieval_residue": retrieval,
         }
+
+    def _in_flight(self, op_id: str) -> bool:
+        """Another operation that has not finalized (its writes are its own to reconcile)."""
+        op = self.journal.get(op_id)
+        return op is not None and op["state"] != "finalized"
 
     def _finalize(self, op_id: str, verification: dict[str, Any]) -> receipts.Receipt:
         op = self.journal.get(op_id)
@@ -522,6 +534,7 @@ class Engine:
             "verification": verification,
         }
         with self.lineage.tx() as c:  # receipt and final op state in one transaction
+            self.lineage.lock(["retract:receipt-chain"])  # parallel ops append one at a time
             self.journal.heartbeat(op_id)
             receipt = receipts.append(c, body)
             c.execute(

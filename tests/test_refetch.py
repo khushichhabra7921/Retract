@@ -16,10 +16,8 @@ class SimulatedCrash(BaseException):
     """Process death: not an Exception, so the engine cannot handle it."""
 
 
-def world(tmp_path):
-    rt = Retract(
-        tmp_path / "lineage.db", stores={"kb": SimpleVectorStore(), "shared": SimpleVectorStore()}
-    )
+def world(db):
+    rt = Retract(db, stores={"kb": SimpleVectorStore(), "shared": SimpleVectorStore()})
     docs = {}
     for name, text in (("a", FALSE), ("b", TRUE), ("c", NEXT), ("d", OTHER)):
         docs[name] = rt.add(text, sources=[src.doc(name)], agent="kb", tier="kb")
@@ -43,8 +41,8 @@ def replacement(rt, old_id):
     return rt.lineage.records([row[0]])[row[0]]
 
 
-def test_refetch_rebuilds_from_fresh_retrieval_and_replay_does_not(tmp_path):
-    rt, docs, out = world(tmp_path)
+def test_refetch_rebuilds_from_fresh_retrieval_and_replay_does_not(db):
+    rt, docs, out = world(db)
     plan = rt.retract(src.doc("a"), dry_run=True)
     reasons = {a.record_id: a.reason for a in plan.actions}
     assert reasons[out["brief_refetch"].record_id] == "refetch"
@@ -68,8 +66,8 @@ def test_refetch_rebuilds_from_fresh_retrieval_and_replay_does_not(tmp_path):
     rt.close()
 
 
-def test_refetch_survives_a_crash_between_journal_and_store_write(tmp_path, monkeypatch):
-    rt, docs, out = world(tmp_path)
+def test_refetch_survives_a_crash_between_journal_and_store_write(db, monkeypatch):
+    rt, docs, out = world(db)
     store = rt.stores["shared"]
     real = store.write
     calls = {"n": 0}

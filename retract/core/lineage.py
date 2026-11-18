@@ -1,4 +1,15 @@
-"""SQLite lineage store: records, parent edges, explicit sources and effective labels."""
+"""Lineage store: records, parent edges, explicit sources and effective labels.
+
+Backends: SQLite (a file path) or Postgres (a postgresql:// URL, `postgres` extra). The SQL is
+written once in the subset both share.
+
+Write serialization. Every write transaction that could race a BLOCK is serialized against it
+by source: a write takes a shared lock on each label of its new record, a BLOCK an exclusive
+lock on its source. Labels never change after insert, and a record joins closure(S) only by
+carrying label S, so a racing write either commits first (and the BLOCK's closure, computed
+under the lock, holds it) or runs after and is rejected (tombstoned label or held input).
+SQLite's BEGIN IMMEDIATE already serializes every writer, so `lock` is a no-op there.
+"""
 
 from __future__ import annotations
 
@@ -11,10 +22,17 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from retract.core.errors import InputNotReadableError, TombstonedSourceError
+from retract.core.errors import (
+    InputNotReadableError,
+    OperationInProgressError,
+    TombstonedSourceError,
+)
 from retract.core.models import Record, Status
+
+if TYPE_CHECKING:
+    from retract.core.postgres import PgConn
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 READABLE = "status = 'active' AND hold_op_id IS NULL"  # the guard rule
@@ -22,7 +40,29 @@ Query = tuple[str, str, int, list[str]]  # (query, tier, k, result record_ids)
 
 
 def _marks(n: int) -> str:
-    return ",".join("?" * n)
+    # `IN (NULL)` matches nothing on both engines; Postgres rejects an empty `IN ()`.
+    # shortcut: one parameter per id, Postgres caps a statement at 65,535; batch past that.
+    return ",".join("?" * n) or "NULL"
+
+
+class Cursor(Protocol):
+    @property
+    def rowcount(self) -> int: ...
+    def fetchone(self) -> Any: ...
+    def fetchall(self) -> list[Any]: ...
+    def __iter__(self) -> Iterator[Any]: ...
+
+
+class Conn(Protocol):
+    """The DB-API surface the store uses: sqlite3.Connection, or PgConn for Postgres."""
+
+    def execute(self, sql: str, parameters: Any = ..., /) -> Cursor: ...
+    def executemany(self, sql: str, parameters: Iterable[Any], /) -> Any: ...
+    def close(self) -> None: ...
+
+
+def is_postgres(target: str | Path) -> bool:
+    return str(target).startswith(("postgresql://", "postgres://"))
 
 
 @dataclass(frozen=True)
@@ -44,33 +84,58 @@ class Node:
 
 
 class LineageStore:
-    def __init__(self, path: str | Path, pseudonym_key: bytes) -> None:
+    def __init__(self, target: str | Path, pseudonym_key: bytes) -> None:
+        """`target`: a SQLite file path, or a postgresql:// URL."""
         self._pseudonym_key = pseudonym_key
+        self.conn: Conn
+        self._pg: PgConn | None = None
+        if is_postgres(target):
+            from retract.core.postgres import PgConn
+
+            self._pg = PgConn(str(target))
+            self.conn = self._pg
+            self._migrate_postgres(self._pg)
+            return
         # Autocommit mode: no implicit transactions, so guarded reads never hold a stale snapshot.
-        self.conn = sqlite3.connect(str(path), isolation_level=None)
-        self.conn.row_factory = sqlite3.Row
+        sqlite = sqlite3.connect(str(target), isolation_level=None)
+        sqlite.row_factory = sqlite3.Row
         for pragma in ("journal_mode = WAL", "foreign_keys = ON", "busy_timeout = 5000"):
-            self.conn.execute(f"PRAGMA {pragma}")
-        self._migrate()
+            sqlite.execute(f"PRAGMA {pragma}")
+        self.conn = sqlite
+        self._migrate_sqlite(sqlite)
 
     def close(self) -> None:
         self.conn.close()
 
-    def _migrate(self) -> None:
-        current = int(self.conn.execute("PRAGMA user_version").fetchone()[0])
+    @staticmethod
+    def _migrations(current: int) -> list[tuple[int, str]]:
+        out = []
         for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
             version = int(path.name.split("_", 1)[0])
-            if version <= current:
-                continue
-            script = path.read_text("utf-8")
+            if version > current:
+                out.append((version, path.read_text("utf-8")))
+        return out
+
+    def _migrate_sqlite(self, conn: sqlite3.Connection) -> None:
+        current = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        for version, script in self._migrations(current):
             try:
-                self.conn.executescript(
+                conn.executescript(
                     f"BEGIN IMMEDIATE;\n{script}\nPRAGMA user_version = {version};\nCOMMIT;"
                 )
             except BaseException:
-                if self.conn.in_transaction:
-                    self.conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
+
+    def _migrate_postgres(self, pg: PgConn) -> None:
+        with self.tx():
+            self.lock(["retract:migrate"])  # many processes may start at once
+            pg.executescript("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER)")
+            current = self.conn.execute("SELECT max(version) FROM schema_version").fetchone()[0]
+            for version, script in self._migrations(int(current or 0)):
+                pg.executescript(script)
+                pg.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
 
     def keyed_hash(self, text: str) -> str:
         """HMAC-SHA256 under the pseudonym key: pseudonymous evidence, not anonymous data."""
@@ -81,14 +146,19 @@ class LineageStore:
         return self.keyed_hash(source_id)
 
     @contextmanager
-    def tx(self) -> Iterator[sqlite3.Connection]:
-        self.conn.execute("BEGIN IMMEDIATE")
+    def tx(self) -> Iterator[Conn]:
+        self.conn.execute("BEGIN" if self._pg else "BEGIN IMMEDIATE")
         try:
             yield self.conn
         except BaseException:
             self.conn.execute("ROLLBACK")
             raise
         self.conn.execute("COMMIT")
+
+    def lock(self, names: Iterable[str], shared: bool = False) -> None:
+        """Inside a tx: serialize on `names` until commit (see the module docstring)."""
+        if self._pg:
+            self._pg.advisory_locks(names, shared)
 
     def insert_pending(
         self,
@@ -113,6 +183,15 @@ class LineageStore:
         parent_ids = [p for p, _ in parents]
         sources = list(dict.fromkeys(explicit_sources))
         with self.tx() as c:
+            inherited = {
+                r[0]
+                for r in c.execute(
+                    f"SELECT source_id FROM labels WHERE record_id IN ({_marks(len(parent_ids))})",
+                    parent_ids,
+                )
+            }
+            labels = sorted(inherited | set(sources))
+            self.lock(labels, shared=True)  # before the checks: BLOCK locks its source exclusively
             ok = {
                 r[0]
                 for r in c.execute(
@@ -123,14 +202,6 @@ class LineageStore:
             }
             if bad := [p for p in parent_ids if p not in ok]:
                 raise InputNotReadableError(bad)
-            inherited = {
-                r[0]
-                for r in c.execute(
-                    f"SELECT source_id FROM labels WHERE record_id IN ({_marks(len(parent_ids))})",
-                    parent_ids,
-                )
-            }
-            labels = sorted(inherited | set(sources))
             refs = [self.source_ref(s) for s in labels]
             if dead := [
                 r[0]
@@ -220,21 +291,36 @@ class LineageStore:
         tombstoned label). Operations, lease lock and stale-plan check wrap this in M3.
         """
         with self.tx():
+            self.lock([source_id])
             ids = self.closure(source_id)
             self.tombstone_and_hold(source_id, op_id, ids)
         return ids
 
     def tombstone_and_hold(self, source_id: str, op_id: str, ids: Iterable[str]) -> None:
-        """Call inside a tx."""
-        ids = list(ids)
+        """Call inside a tx, after `lock([source_id])` and computing the closure.
+
+        Holds are the per-closure lock: a record is taken only if no other operation holds
+        it. If one does, raise, so the caller's tx rolls back and nothing is blocked."""
+        ids = list(dict.fromkeys(ids))
         self.conn.execute(
-            "INSERT OR IGNORE INTO tombstones (source_ref, op_id, created_at) VALUES (?, ?, ?)",
+            "INSERT INTO tombstones (source_ref, op_id, created_at) VALUES (?, ?, ?)"
+            " ON CONFLICT DO NOTHING",
             (self.source_ref(source_id), op_id, datetime.now(UTC).isoformat()),
         )
-        self.conn.execute(
-            f"UPDATE records SET hold_op_id = ? WHERE record_id IN ({_marks(len(ids))})",
+        held = self.conn.execute(
+            f"UPDATE records SET hold_op_id = ? WHERE record_id IN ({_marks(len(ids))})"
+            " AND hold_op_id IS NULL",
             [op_id, *ids],
-        )
+        ).rowcount
+        if held != len(ids):
+            row = self.conn.execute(
+                f"SELECT hold_op_id FROM records WHERE record_id IN ({_marks(len(ids))})"
+                " AND hold_op_id <> ?",
+                [*ids, op_id],
+            ).fetchone()
+            raise OperationInProgressError(
+                str(row[0]) if row else "?", "holding records this retraction needs"
+            )
 
     def closure(self, source_id: str) -> set[str]:
         """Records owning `source_id` plus every descendant along parent edges."""

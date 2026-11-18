@@ -2,7 +2,7 @@
 
 # Each recipe names the extras it needs, so it also works from a clean clone.
 test:
-	uv run --extra testbed --extra llm --extra dashboard python -m pytest
+	uv run --extra testbed --extra llm --extra dashboard --extra postgres python -m pytest
 
 demo:
 	uv run --extra dashboard python -m retract.cli demo

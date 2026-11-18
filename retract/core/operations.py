@@ -1,14 +1,14 @@
-"""Operation journal and the durable logical lock.
+"""Operation journal and op ownership.
 
-The lock is an `operations` row in state 'executing' whose lease has not expired. The owner
-renews the lease (heartbeat) during repair. `resume` may take over on lease expiry or when the
-owner token matches, so a crashed process never blocks future work permanently.
-shortcut: one global executing op, upgrade to per-closure locks if parallel retractions matter.
+Locking is per closure: an op holds the records of its closure (`records.hold_op_id`, taken
+atomically at BLOCK), so retractions with disjoint closures run in parallel and an overlapping
+one is refused. The lease says which process owns an op: the owner renews it (heartbeat)
+during repair, and `resume` may take over on lease expiry or when the owner token matches, so
+a crashed process never blocks future work permanently.
 """
 
 from __future__ import annotations
 
-import sqlite3
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from retract.core.errors import OperationInProgressError
-from retract.core.lineage import LineageStore
+from retract.core.lineage import Conn, LineageStore
 
 
 @dataclass(frozen=True)
@@ -49,16 +49,8 @@ class Journal:
         self.clock = clock
 
     @property
-    def conn(self) -> sqlite3.Connection:
+    def conn(self) -> Conn:
         return self.lineage.conn
-
-    def live_executing(self, exclude: str | None = None) -> str | None:
-        row = self.conn.execute(
-            "SELECT op_id FROM operations WHERE state = 'executing' AND lease_expires_at > ?"
-            " AND op_id IS NOT ?",
-            (self.clock(), exclude),
-        ).fetchone()
-        return str(row[0]) if row else None
 
     def create(
         self,
@@ -88,20 +80,16 @@ class Journal:
             [(op_id, rid, i, act, why, h) for i, (rid, act, why, h) in enumerate(actions)],
         )
 
-    def get(self, op_id: str) -> sqlite3.Row | None:
-        row: sqlite3.Row | None = self.conn.execute(
-            "SELECT * FROM operations WHERE op_id = ?", (op_id,)
-        ).fetchone()
-        return row
+    def get(self, op_id: str) -> Any:
+        return self.conn.execute("SELECT * FROM operations WHERE op_id = ?", (op_id,)).fetchone()
 
-    def op_for_source(self, source_ref: str) -> sqlite3.Row | None:
+    def op_for_source(self, source_ref: str) -> Any:
         """The operation that tombstoned this source, if any."""
-        row: sqlite3.Row | None = self.conn.execute(
+        return self.conn.execute(
             "SELECT o.* FROM tombstones t JOIN operations o ON o.op_id = t.op_id"
             " WHERE t.source_ref = ?",
             (source_ref,),
         ).fetchone()
-        return row
 
     def take_over(self, op_id: str) -> None:
         """Resume ownership: allowed on lease expiry or owner match, never over a live owner."""
@@ -114,8 +102,6 @@ class Journal:
                 and op["owner_token"] != self.owner_token
             ):
                 raise OperationInProgressError(op_id)
-            if other := self.live_executing(exclude=op_id):
-                raise OperationInProgressError(other)
             self.conn.execute(
                 "UPDATE operations SET state = 'executing', outcome = NULL, error = NULL,"
                 " owner_token = ?, lease_expires_at = ? WHERE op_id = ?",

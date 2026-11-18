@@ -177,7 +177,7 @@ def add_notes(rt, llm, world, n):
     return [note(inputs=[world.summary]) for _ in range(n)]
 
 
-def test_crash_after_5_actions_resume_reconciles(rt, world, llm, tmp_path, monkeypatch):
+def test_crash_after_5_actions_resume_reconciles(rt, world, llm, db, monkeypatch):
     add_notes(rt, llm, world, 4)  # 7 re-derives in total
     writes = Counter()
     with monkeypatch.context() as m:
@@ -196,13 +196,13 @@ def test_crash_after_5_actions_resume_reconciles(rt, world, llm, tmp_path, monke
     op_id = only_op(rt)
     assert rows(rt, "SELECT state FROM operations")[0][0] == "executing"
 
-    other = Retract(tmp_path / "lineage.db", stores=rt.stores)  # a new process
+    other = Retract(db, stores=rt.stores)  # a new process
     register(other, llm)
     other.derives("note", agent="planning", tier=PLANNING)(
         lambda ins: "Note: " + llm.summarize([r.content for r in ins])
     )
     with pytest.raises(OperationInProgressError) as e:
-        other.retract(ARJUN)  # the live lease is the global lock
+        other.retract(ARJUN)  # Priya's op holds the shared records
     assert e.value.op_id == op_id
     with pytest.raises(OperationInProgressError):
         other.resume(op_id)  # not the owner and the lease is live
@@ -355,8 +355,8 @@ def test_version_mismatch_is_quarantined(rt, world):
     assert not readable_facts(rt) & PRIYA_FACTS
 
 
-def test_unregistered_function_is_quarantined(rt, world, tmp_path):
-    fresh = Retract(tmp_path / "lineage.db", stores=rt.stores)  # new process, nothing registered
+def test_unregistered_function_is_quarantined(rt, world, db):
+    fresh = Retract(db, stores=rt.stores)  # new process, nothing registered
     receipt = fresh.retract(PRIYA)
     assert receipt.outcome == "contained"
     reasons = {a["record_id"]: a["reason"] for a in receipt.body["actions"]}

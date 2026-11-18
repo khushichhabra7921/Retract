@@ -118,9 +118,9 @@ class FailingWrite(SimpleVectorStore):
         raise ConnectionError("store down")
 
 
-def test_crash_between_lineage_insert_and_adapter_write(tmp_path):
+def test_crash_between_lineage_insert_and_adapter_write(db):
     store = FailingWrite()
-    rt = Retract(tmp_path / "l.db", stores={"t": store})
+    rt = Retract(db, stores={"t": store})
     with pytest.raises(ConnectionError):
         rt.add("x", agent="a", tier="t", sources=[src.user("u")])
     [(rid,)] = rt.lineage.conn.execute("SELECT record_id FROM records WHERE status = 'pending'")

@@ -29,7 +29,7 @@ class SimpleVectorStore(MemoryAdapter):
         q = self.embed(query)
         scored = [
             (sum(a * b for a, b in zip(q, vec, strict=True)), item)
-            for item, vec in self._items.values()
+            for item, vec in list(self._items.values())  # snapshot: other threads may write
         ]
         scored.sort(key=lambda s: -s[0])  # stable: ties keep insertion order
         return [item for _, item in scored[:k]]
@@ -41,7 +41,7 @@ class SimpleVectorStore(MemoryAdapter):
         return next(
             (
                 i
-                for i, (item, _) in self._items.items()
+                for i, (item, _) in list(self._items.items())
                 if item.metadata.get("retract_token") == retract_token
             ),
             None,

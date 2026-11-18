@@ -65,7 +65,7 @@ CREATE TABLE tombstones (
     created_at TEXT NOT NULL
 );
 
--- Operation journal. An 'executing' row with a live lease is the durable global lock.
+-- Operation journal. The lease marks the live owner of an op; record holds are the lock.
 CREATE TABLE operations (
     op_id             TEXT PRIMARY KEY,
     source_ref        TEXT NOT NULL,
@@ -74,7 +74,7 @@ CREATE TABLE operations (
     state             TEXT NOT NULL CHECK (state IN ('executing', 'failed', 'finalized')),
     outcome           TEXT CHECK (outcome IN ('completed', 'contained', 'failed')),
     owner_token       TEXT,
-    lease_expires_at  REAL,
+    lease_expires_at  DOUBLE PRECISION,  -- epoch seconds; REAL affinity in SQLite
     error             TEXT,
     created_at        TEXT NOT NULL
 );

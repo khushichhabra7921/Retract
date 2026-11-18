@@ -47,11 +47,10 @@ This is a solo, part-time build from 9 Nov to 6 Dec 2026.
 ## Trimmed or narrowed vs the review
 - **Public modes are `auto | delete | quarantine`.** Re-derive is a per-record action, not a mode.
 - **Graph property tests:** a seeded random-DAG generator with stdlib `random`. No `hypothesis`.
-- **Concurrency:** one executing retraction at a time, enforced by a **durable logical lock**.
-  - The lock is an `operations` row in state `executing` with `owner_token` and `lease_expires_at`, renewed by heartbeat during repair.
-  - A second retraction gets `OperationInProgressError(op_id)`.
+- **Concurrency:** per-closure locks since M10 (Nov 18). Until then, one executing retraction at a time.
+  - Each op's holds (`records.hold_op_id`, taken atomically at BLOCK) are its lock. A retraction whose closure overlaps another op's held records gets `OperationInProgressError(op_id)`; disjoint closures run in parallel.
+  - Op ownership is an `operations` row with `owner_token` and `lease_expires_at`, renewed by heartbeat during repair.
   - `rt.resume(op_id)` is allowed when the lease has expired or the `owner_token` matches, so a crashed process never blocks future work permanently.
-  - `shortcut: one global executing op, upgrade to per-closure locks if parallel retractions matter.`
 - **No LangGraph store adapter.** LangGraph does orchestration only; memory goes through Retract adapters. The audit flags likely bypasses via LangGraph `store.put`.
 
 ## Guarantee levels (README, dashboard and RESULTS use these exact words)
@@ -194,14 +193,14 @@ Repair writes by the engine use the same path. The one difference is that inputs
 1. **PLAN** (dry run): compute the closure and the per-record actions. No writes.
 2. **BLOCK:** one short transaction. It never stays open during LLM or adapter calls.
    ```
-   BEGIN IMMEDIATE
-     acquire durable operation ownership (no other op 'executing' with a live lease)
+   BEGIN IMMEDIATE (Postgres: BEGIN + exclusive advisory lock on the source)
      recompute affected closure
      compare with previewed closure
      if stale: ROLLBACK, raise StalePlanError   -- source NOT tombstoned, nothing held
      insert source tombstone
-     set hold_op_id on the entire closure
-     insert the operation row and all pending op_actions
+     set hold_op_id on the entire closure, only where no other op holds it
+       (any record already held: ROLLBACK, raise OperationInProgressError)
+     insert the operation row (owner_token, lease) and all pending op_actions
    COMMIT
    ```
 3. **REPAIR:** each action in topological order via the write path, with tokens journaled first and a heartbeat renewing the lease.
@@ -609,6 +608,37 @@ Never cut: experiments, receipts, recovery, probes.
   - `refcount_remove` equals naive delete in 90/90 trials;
   - wrong_user ends with residue 0/30.
 - **Real-model false alarms:** replaying the committed Groq `auto` runs under the new rule gave 0 false alarms on 54 replacements and no cache misses. The full Groq results predate M9 and need a live re-run.
+
+**M10 decisions: Postgres backend and per-closure locks (Nov 18; the user may overrule any):**
+- **Backend choice by target.** `Retract(db)` takes a SQLite path or a `postgresql://` URL. Postgres needs the `postgres` extra (psycopg 3) and is imported only when used.
+- **One SQL dialect.** The store's SQL is written once in the subset both engines share:
+  - `ON CONFLICT DO NOTHING` instead of `INSERT OR IGNORE`;
+  - an empty id list becomes `IN (NULL)`;
+  - `lease_expires_at` is `DOUBLE PRECISION` (`REAL` is 4 bytes in Postgres and would lose seconds).
+  - `PgConn` turns `?` into `%s` and returns rows indexable by name and position, so the journal, receipts and tests run unchanged.
+  - The dashboard and the experiments stay on SQLite (the dashboard orders by `rowid`).
+- **Migrations on Postgres:** a `schema_version` table, under an advisory lock so processes starting together migrate once.
+- **Write serialization.** SQLite's `BEGIN IMMEDIATE` serializes every writer. Postgres uses transaction-scoped advisory locks keyed by source instead:
+  - a write takes a shared lock on each label of its new record before checking its inputs and tombstones;
+  - BLOCK takes an exclusive lock on its source before computing the closure.
+  - Labels never change after insert, and a record joins closure(S) only by carrying label S, so a racing write either commits first and is held, or runs after and is rejected.
+  - Writes for different sources never wait on each other.
+- **Per-closure locks are the holds.** BLOCK sets `hold_op_id` only where it is NULL and raises if any record was already held. Under Postgres row locking, that is atomic even when two BLOCKs race.
+  - Two ops with disjoint closures cannot interfere through repair. A record with a parent in another op's closure is itself in that closure, so the two closures would overlap.
+  - The global "one executing op" check is gone; leases remain for ownership and resume.
+- **Receipt chain:** FINALIZE takes an exclusive advisory lock for the chain, so parallel ops append gapless `seq` values.
+- **VERIFY with parallel ops.** A pending row held by another op, or an adapter item whose token names another unfinished op, is that op's in-flight write, not an orphan of this one. Before this change, an unrelated op failed VERIFY whenever an earlier failed op had left an unfinished replacement.
+- **Tests run on both backends.** The `db` fixture is parametrized: SQLite always, Postgres when `RETRACT_TEST_PG` is set (one schema per test). CI adds a Postgres 17 service job.
+  - New tests (`tests/test_concurrency.py`):
+    - a disjoint retraction finishes while another is mid-repair;
+    - an overlapping one is refused and blocks nothing;
+    - two racing BLOCKs over a shared record: exactly one wins;
+    - four parallel retractions leave a whole receipt chain;
+    - another op's unfinished replacement is not an orphan.
+  - Checked by disabling each lock on Postgres:
+    - without the source locks, the existing write-vs-BLOCK race test failed 4/5 runs;
+    - without the chain lock, the parallel test failed 4/5 with a duplicate `seq`.
+- **Not done:** a throughput benchmark at scale, batching of id lists past Postgres's 65,535-parameter cap (marked `shortcut:`), and Postgres for the dashboard.
 
 **M6 decisions (the user may overrule any):**
 - **Entry points:** `retract audit <path>...` (`[project.scripts]`, or `python -m retract.cli audit`). The code is in `retract/audit.py`, stdlib `ast` and `tomllib` only.

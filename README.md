@@ -96,7 +96,7 @@ The dashboard binds to 127.0.0.1 only. Every state change is a POST carrying a C
 
 | Call | What it does |
 |---|---|
-| `Retract(db, stores={tier: adapter}, similarity_threshold=0.75, novel_tokens=2)` | Lineage store plus one adapter per tier; the two post-repair check settings, tuned on dev seeds |
+| `Retract(db, stores={tier: adapter}, similarity_threshold=0.75, novel_tokens=2)` | Lineage store plus one adapter per tier; the two post-repair check settings, tuned on dev seeds. `db` is a SQLite file path, or a `postgresql://` URL (extra `postgres`) so agents on several machines share one lineage store. |
 | `rt.add(text, sources=[...], agent=, tier=)` | Primary record owned by `sources` (`src.user`, `src.doc`, `src.conversation`, `src.tool`) |
 | `@rt.derives(op, agent=, tier=, version="1", replayable=True, refetch=False)` | Registers a derivation. Calling it with `inputs=[...]` writes a derived record with parent edges. With `refetch=True`, repair re-runs the step's searches instead of only replaying old inputs. |
 | `with rt.step(agent, tier):` | Guarded reads inside the step become parents of every write in it (deliberate over-approximation) |
@@ -134,7 +134,7 @@ FakeLLM, 30 paired test seeds, three scenarios: a user deletion, a false documen
 - **The runtime check is a heuristic:** sentence and embedding match, plus novel tokens. It misses paraphrases that drop every identifying detail, and its false-alarm rate on real LLM output is measured on only 54 replacements.
 - **Only `@rt.derives` writes can be rebuilt.** A record written in `rt.step` without a registered function cannot be replayed, so `auto` mode quarantines it.
 - **Re-derivation by replay** uses old inputs minus the retracted ones, so repaired memory can differ from a clean history. `refetch=True` re-runs retrieval instead, but searches during repair cannot see records of the same closure that are not yet repaired.
-- **Concurrency:** one retraction executes at a time (a durable lease lock).
+- **Concurrency:** retractions run in parallel when their closures are disjoint. One whose closure overlaps a running or failed operation is refused until that operation finishes or is resumed. Throughput at scale is not benchmarked: the largest test retracts 54 records.
 - **Receipts:** anyone with database write access *and* the signing key can rewrite history.
 - **Status:** pre-alpha; APIs may change.
 
@@ -143,7 +143,7 @@ FakeLLM, 30 paired test seeds, three scenarios: a user deletion, a false documen
 - Hosted-LLM results with more seeds and a second model (the harness is ready: `--seeds N --model ...`).
 - A semantic check for paraphrases that drop identifying details, and a false-alarm measurement on real LLM output.
 - More adapters: managed vector stores and LangGraph store integration.
-- Per-closure locks for parallel retractions.
+- A scale benchmark on Postgres (100K–1M records) before any throughput claim.
 - Cross-module dataflow in `retract audit`.
 - Erasure work beyond L2: vector-index internals.
 
@@ -189,7 +189,13 @@ Requires Python 3.11+ and git.
    make test
    ```
 
-Optional extras: `llm`, `embed`, `mem0`, `testbed`, `dashboard` (for example `uv sync --extra mem0`). The make targets install the extras they need.
+Optional extras: `llm`, `embed`, `mem0`, `testbed`, `dashboard`, `postgres` (for example `uv sync --extra mem0`). The make targets install the extras they need.
+
+To also run every lineage test against Postgres, point `RETRACT_TEST_PG` at a database you can create schemas in. Each test gets its own schema and drops it afterwards:
+
+```bash
+RETRACT_TEST_PG=postgresql://postgres@127.0.0.1:5432/postgres make test
+```
 
 | Target | What it runs |
 |---|---|

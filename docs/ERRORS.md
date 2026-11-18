@@ -270,3 +270,21 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 ### 59. Groq replay test pinned the old set of configs
 - **Cause:** `refetch` and `refcount_remove` are now Groq configs too.
 - **Fix:** the test compares against `GROQ_RUNS`.
+
+## M10 (Postgres backend, per-closure locks)
+
+### 60. Shell-embedded patch to `lineage.py`: "unexpected EOF while looking for matching `'`"
+- **Cause:** entry 31 again; the patch text held quotes and backslash escapes inside a heredoc.
+- **Fix:** nothing was written. The patch went into a temp script file, run from there.
+
+### 61. Git warned "CRLF will be replaced by LF" on five patched files
+- **Cause:** entry 35 again: `Path.write_text` on Windows writes each newline as CRLF.
+- **Fix:** stripped the carriage returns; later patch scripts pass `newline="\n"`.
+
+### 62. mypy: unused `type: ignore` and "Value of type `Row | None` is not indexable"
+- **Cause:** the override ignore was not needed, and a migration query read `fetchone()[0]` through psycopg's typed cursor.
+- **Fix:** removed the ignore; the query goes through the store's `Conn` protocol, whose `fetchone` returns `Any` like sqlite3.
+
+### 63. New threaded tests failed on SQLite: "SQLite objects created in a thread can only be used in that same thread"
+- **Cause:** a test bug. The worker `Retract` instances were opened on the main thread and used on worker threads.
+- **Fix:** each worker opens its own connection inside its thread.
