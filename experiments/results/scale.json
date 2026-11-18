@@ -1,0 +1,336 @@
+{
+  "machine": {
+    "python": "3.12.10",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "llm_delay_s": 1.0,
+  "runs": {
+    "1": "before the parallel harness counted every thread's result",
+    "2": "every thread counted",
+    "2b": "SQLite 100K only, after the VERIFY fix"
+  },
+  "rows": [
+    {
+      "run": "1",
+      "backend": "sqlite",
+      "records": 999,
+      "users": 222,
+      "build_s": 11.216539000000921,
+      "writes_per_s": 89.0649067417247,
+      "write_ms": 10.094449993630406,
+      "read_ms_raw": 5.384049996791873,
+      "read_ms_extra": 2.30875000852393,
+      "op_s": 1.0056960999936564,
+      "probes_s": 0.8393342000053963,
+      "rest_s": 0.16636189998826012,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 7.824594800011255,
+        "parallel_s": 4.265859700011788,
+        "speedup": 1.83423632052166,
+        "outcomes": [
+          "completed"
+        ]
+      },
+      "note": "parallel.outcomes lists only threads that returned (ERRORS 68)"
+    },
+    {
+      "run": "1",
+      "backend": "sqlite",
+      "records": 9999,
+      "users": 2222,
+      "build_s": 114.87144060000719,
+      "writes_per_s": 87.04513452405831,
+      "write_ms": 8.149049994244706,
+      "read_ms_raw": 24.555149997468106,
+      "read_ms_extra": 10.054650003439747,
+      "op_s": 3.855860199997551,
+      "probes_s": 3.4969449000054738,
+      "rest_s": 0.35891529999207705,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 18.09001650000573,
+        "parallel_s": 23.65059580000525,
+        "speedup": 0.7648862909407854,
+        "outcomes": [
+          "completed"
+        ]
+      },
+      "note": "parallel.outcomes lists only threads that returned (ERRORS 68)"
+    },
+    {
+      "run": "1",
+      "backend": "sqlite",
+      "records": 99999,
+      "users": 22222,
+      "build_s": 8004.723563199994,
+      "writes_per_s": 12.492498861512724,
+      "write_ms": 5.491850002727006,
+      "read_ms_raw": 591.59229999932,
+      "read_ms_extra": 135.14030000078492,
+      "op_s": 68.2907339999947,
+      "probes_s": 56.23242759999994,
+      "rest_s": 12.058306399994763,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 269.2456091000058,
+        "parallel_s": 272.80829800000356,
+        "speedup": 0.9869406871927419,
+        "outcomes": [
+          "completed"
+        ]
+      },
+      "note": "parallel.outcomes lists only threads that returned (ERRORS 68)"
+    },
+    {
+      "run": "1",
+      "backend": "postgres",
+      "records": 999,
+      "users": 222,
+      "build_s": 2.2647342999989633,
+      "writes_per_s": 441.1113480289751,
+      "write_ms": 1.8636999957379885,
+      "read_ms_raw": 1.982250003493391,
+      "read_ms_extra": 2.2910499974386767,
+      "op_s": 0.7915856000036001,
+      "probes_s": 0.709368000010727,
+      "rest_s": 0.08221759999287315,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 6.336699899999076,
+        "parallel_s": 3.262232799999765,
+        "speedup": 1.9424425810443484,
+        "outcomes": [
+          "completed"
+        ]
+      },
+      "note": "parallel.outcomes lists only threads that returned (ERRORS 68)"
+    },
+    {
+      "run": "1",
+      "backend": "postgres",
+      "records": 9999,
+      "users": 2222,
+      "build_s": 39.02122260000033,
+      "writes_per_s": 256.24517464503833,
+      "write_ms": 3.627099998993799,
+      "read_ms_raw": 42.66595000080997,
+      "read_ms_extra": 8.771900000283495,
+      "op_s": 5.510718699995778,
+      "probes_s": 5.270840799988946,
+      "rest_s": 0.23987790000683162,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 25.3837693999958,
+        "parallel_s": 21.156993299999158,
+        "speedup": 1.199781511487117,
+        "outcomes": [
+          "completed"
+        ]
+      },
+      "note": "parallel.outcomes lists only threads that returned (ERRORS 68)"
+    },
+    {
+      "run": "1",
+      "backend": "postgres",
+      "records": 99999,
+      "users": 22222,
+      "build_s": 339.63316060000216,
+      "writes_per_s": 294.43238058186057,
+      "write_ms": 1.991799996176269,
+      "read_ms_raw": 560.8244000104605,
+      "read_ms_extra": -65.71700000495184,
+      "op_s": 55.193327900007716,
+      "probes_s": 54.05279590000282,
+      "rest_s": 1.140532000004896,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 225.12470519999624,
+        "parallel_s": 231.77392140000302,
+        "speedup": 0.971311629195196,
+        "outcomes": [
+          "completed"
+        ]
+      },
+      "note": "parallel.outcomes lists only threads that returned (ERRORS 68)"
+    },
+    {
+      "run": "2",
+      "backend": "sqlite",
+      "records": 999,
+      "users": 222,
+      "build_s": 7.167752199995448,
+      "writes_per_s": 139.3742378539027,
+      "write_ms": 6.499150003946852,
+      "read_ms_raw": 4.146550003497396,
+      "read_ms_extra": 1.5167500023380853,
+      "op_s": 0.8868440999940503,
+      "probes_s": 0.7925503000005847,
+      "rest_s": 0.09429379999346565,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 6.523407999993651,
+        "parallel_s": 2.6791064999997616,
+        "speedup": 2.4349192538610285,
+        "outcomes": {
+          "completed": 8
+        }
+      }
+    },
+    {
+      "run": "2",
+      "backend": "sqlite",
+      "records": 9999,
+      "users": 2222,
+      "build_s": 85.85031759999401,
+      "writes_per_s": 116.47015735677019,
+      "write_ms": 5.663199997798074,
+      "read_ms_raw": 35.00445000099717,
+      "read_ms_extra": 16.495399991981685,
+      "op_s": 6.326739700001781,
+      "probes_s": 5.960606299995561,
+      "rest_s": 0.36613340000621974,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 24.841202700001304,
+        "parallel_s": 21.602585000000545,
+        "speedup": 1.1499180630466528,
+        "outcomes": {
+          "completed": 8
+        }
+      }
+    },
+    {
+      "run": "2",
+      "backend": "sqlite",
+      "records": 99999,
+      "users": 22222,
+      "build_s": 2557.1989931999997,
+      "writes_per_s": 39.104895733931265,
+      "write_ms": 8.587699994677678,
+      "read_ms_raw": 610.3928499942413,
+      "read_ms_extra": 85.64465001109056,
+      "op_s": 72.41023600001063,
+      "probes_s": 59.42205749999266,
+      "rest_s": 12.988178500017966,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 288.62226999999257,
+        "parallel_s": 269.2454973999993,
+        "speedup": 1.0719669327327934,
+        "outcomes": {
+          "completed": 6,
+          "RetractionFailedError: retraction 34c046c858344086ba65ce243681c7f2 failed: StructuralVerificationError: structural verification failed: source-specific=[] global-integrity=['no_unrelated_orphans']": 1,
+          "RetractionFailedError: retraction fe95031ba09f4f189fee4414193c0ff3 failed: StructuralVerificationError: structural verification failed: source-specific=[] global-integrity=['no_unrelated_orphans']": 1
+        }
+      },
+      "note": "2 of 8 retractions failed: the VERIFY race in ERRORS 68, fixed before run 2b"
+    },
+    {
+      "run": "2",
+      "backend": "postgres",
+      "records": 999,
+      "users": 222,
+      "build_s": 5.730555300004198,
+      "writes_per_s": 174.32865537468388,
+      "write_ms": 5.514399999810848,
+      "read_ms_raw": 6.185449994518422,
+      "read_ms_extra": 6.384550011716783,
+      "op_s": 1.078125200001523,
+      "probes_s": 0.8295630000066012,
+      "rest_s": 0.24856219999492168,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 6.815819600000395,
+        "parallel_s": 3.1090106000046944,
+        "speedup": 2.192279305831284,
+        "outcomes": {
+          "completed": 8
+        }
+      }
+    },
+    {
+      "run": "2",
+      "backend": "postgres",
+      "records": 9999,
+      "users": 2222,
+      "build_s": 70.35445620000246,
+      "writes_per_s": 142.12319361228538,
+      "write_ms": 6.07385000330396,
+      "read_ms_raw": 53.49679999926593,
+      "read_ms_extra": 8.152600006724242,
+      "op_s": 7.738239099999191,
+      "probes_s": 7.484478200000012,
+      "rest_s": 0.25376089999917895,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 25.866784099998767,
+        "parallel_s": 26.099428100002115,
+        "speedup": 0.9910862414642975,
+        "outcomes": {
+          "completed": 8
+        }
+      }
+    },
+    {
+      "run": "2",
+      "backend": "postgres",
+      "records": 99999,
+      "users": 22222,
+      "build_s": 1158.1438881000067,
+      "writes_per_s": 86.34419352163002,
+      "write_ms": 3.2547999944654293,
+      "read_ms_raw": 420.3582499976619,
+      "read_ms_extra": -163.91904999909457,
+      "op_s": 53.71088170001167,
+      "probes_s": 52.90260919999855,
+      "rest_s": 0.8082725000131177,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 215.47754559999157,
+        "parallel_s": 227.0009895999974,
+        "speedup": 0.9492361508189391,
+        "outcomes": {
+          "completed": 8
+        }
+      }
+    },
+    {
+      "run": "2b",
+      "backend": "sqlite",
+      "records": 99999,
+      "users": 22222,
+      "build_s": 2945.753075799992,
+      "writes_per_s": 33.94683716755275,
+      "write_ms": 6.597949999559205,
+      "read_ms_raw": 592.9874499925063,
+      "read_ms_extra": 165.46315000596223,
+      "op_s": 66.26213079999434,
+      "probes_s": 54.35331459999725,
+      "rest_s": 11.90881619999709,
+      "closure": 5,
+      "outcome": "completed",
+      "parallel": {
+        "serial_s": 8986.561958299993,
+        "parallel_s": 233.38776700000744,
+        "speedup": 38.50485427670126,
+        "outcomes": {
+          "completed": 8
+        }
+      },
+      "note": "SQLite 100K re-run after the VERIFY fix (ERRORS 68). Windows Modern Standby (8,691 s, from the system event log) fell inside parallel.serial_s, so that value and the speedup are not measurements."
+    }
+  ]
+}

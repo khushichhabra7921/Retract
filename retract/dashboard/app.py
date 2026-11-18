@@ -198,7 +198,7 @@ def _records(rt: Retract) -> list[dict[str, Any]]:
     derived = {r[0] for r in conn.execute("SELECT DISTINCT child_id FROM edges")}
     rows = conn.execute(
         "SELECT record_id, agent, tier, status, hold_op_id, content FROM records"
-        " ORDER BY created_at, rowid"
+        " ORDER BY created_at, record_id"  # portable tie-break (no rowid in Postgres)
     )
     return [
         {
@@ -297,7 +297,7 @@ def _ops(rt: Retract) -> list[dict[str, Any]]:
     names = {rt.source_ref(s): s for s in _known_sources(rt)}
     rows = rt.lineage.conn.execute(
         "SELECT op_id, source_ref, mode, state, outcome, error, created_at FROM operations"
-        " ORDER BY created_at DESC, rowid DESC"
+        " ORDER BY created_at DESC, op_id DESC"
     )
     return [
         {"op_id": r[0], "source": names.get(r[1], r[1][:12] + "…"), "mode": r[2],

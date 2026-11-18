@@ -134,3 +134,12 @@ def test_wrong_user_scenario_retracts_the_sync_and_keeps_real_facts(tmp_path, mo
     assert b["raw_items_with_target"]["not_quarantined"] > 0  # the misrouted contacts spread
     assert a["raw_items_with_target"]["not_quarantined"] == 0
     assert a["useful_answers"] == b["useful_answers"]  # customers' own facts are kept
+
+
+def test_scale_benchmark_smoke(db, monkeypatch):
+    from experiments import scale
+
+    monkeypatch.setattr(scale, "LLM_DELAY", 0.0)
+    row = scale.run_size(db, users=32)
+    assert row["records"] == 144 and row["closure"] == 5 and row["outcome"] == "completed"
+    assert row["parallel"]["outcomes"] == {"completed": 8}  # 4 serial, 4 in parallel

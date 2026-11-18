@@ -638,7 +638,9 @@ Never cut: experiments, receipts, recovery, probes.
   - Checked by disabling each lock on Postgres:
     - without the source locks, the existing write-vs-BLOCK race test failed 4/5 runs;
     - without the chain lock, the parallel test failed 4/5 with a duplicate `seq`.
-- **Not done:** a throughput benchmark at scale, batching of id lists past Postgres's 65,535-parameter cap (marked `shortcut:`), and Postgres for the dashboard.
+- **Id lists in batches:** every `IN (...)` query in the lineage store runs once per 30,000 ids (`lineage.BATCH`), under SQLite's 32,766 and Postgres's 65,535 parameter caps, so a closure of any size can be blocked. A test retracts a 6-record closure with `BATCH = 2`.
+- **Dashboard on Postgres:** ties in record and op ordering break on `record_id` and `op_id` instead of SQLite's `rowid`. `demo.build(db)` takes any lineage target, and the dashboard tests run on both backends. `retract demo` still builds its world in a fresh temp SQLite file, because the demo needs an empty store.
+- **Scale benchmark:** `experiments/scale.py`, results in RESULTS 6.12. Writes stay flat from 1K to 100K records, but a 5-record retraction grows from about 1 s to 54–68 s, because VERIFY's global checks and the residue support set scan the whole store. Scoping them to the closure is the next step. Run 2 also found a VERIFY race at 100K records (ERRORS 68), now fixed.
 
 **M6 decisions (the user may overrule any):**
 - **Entry points:** `retract audit <path>...` (`[project.scripts]`, or `python -m retract.cli audit`). The code is in `retract/audit.py`, stdlib `ast` and `tomllib` only.

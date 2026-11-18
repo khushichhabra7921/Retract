@@ -39,10 +39,16 @@ READABLE = "status = 'active' AND hold_op_id IS NULL"  # the guard rule
 Query = tuple[str, str, int, list[str]]  # (query, tier, k, result record_ids)
 
 
+BATCH = 30_000  # ids per IN list: under SQLite's 32,766 and Postgres's 65,535 parameters
+
+
 def _marks(n: int) -> str:
-    # `IN (NULL)` matches nothing on both engines; Postgres rejects an empty `IN ()`.
-    # shortcut: one parameter per id, Postgres caps a statement at 65,535; batch past that.
-    return ",".join("?" * n) or "NULL"
+    return ",".join("?" * n)
+
+
+def _batches(ids: Sequence[str]) -> Iterator[Sequence[str]]:
+    """Non-empty slices of at most BATCH ids (Postgres also rejects an empty `IN ()`)."""
+    return (ids[i : i + BATCH] for i in range(0, len(ids), BATCH))
 
 
 class Cursor(Protocol):
@@ -155,6 +161,11 @@ class LineageStore:
             raise
         self.conn.execute("COMMIT")
 
+    def _in(self, sql: str, ids: Sequence[str], after: Sequence[Any] = ()) -> Iterator[Any]:
+        """Run `sql`, whose `{}` is an IN list, once per batch of `ids`; yield every row."""
+        for part in _batches(ids):
+            yield from self.conn.execute(sql.format(_marks(len(part))), [*part, *after])
+
     def lock(self, names: Iterable[str], shared: bool = False) -> None:
         """Inside a tx: serialize on `names` until commit (see the module docstring)."""
         if self._pg:
@@ -185,19 +196,19 @@ class LineageStore:
         with self.tx() as c:
             inherited = {
                 r[0]
-                for r in c.execute(
-                    f"SELECT source_id FROM labels WHERE record_id IN ({_marks(len(parent_ids))})",
-                    parent_ids,
+                for r in self._in(
+                    "SELECT source_id FROM labels WHERE record_id IN ({})", parent_ids
                 )
             }
             labels = sorted(inherited | set(sources))
             self.lock(labels, shared=True)  # before the checks: BLOCK locks its source exclusively
             ok = {
                 r[0]
-                for r in c.execute(
-                    f"SELECT record_id FROM records WHERE record_id IN ({_marks(len(parent_ids))})"
+                for r in self._in(
+                    "SELECT record_id FROM records WHERE record_id IN ({})"
                     " AND status = 'active' AND (hold_op_id IS NULL OR hold_op_id = ?)",
-                    [*parent_ids, hold_op_id],
+                    parent_ids,
+                    after=[hold_op_id],
                 )
             }
             if bad := [p for p in parent_ids if p not in ok]:
@@ -205,9 +216,8 @@ class LineageStore:
             refs = [self.source_ref(s) for s in labels]
             if dead := [
                 r[0]
-                for r in c.execute(
-                    f"SELECT source_ref FROM tombstones WHERE source_ref IN ({_marks(len(refs))})",
-                    refs,
+                for r in self._in(
+                    "SELECT source_ref FROM tombstones WHERE source_ref IN ({})", refs
                 )
             ]:
                 raise TombstonedSourceError(dead)
@@ -260,14 +270,11 @@ class LineageStore:
     def records(self, record_ids: Sequence[str], readable_only: bool = False) -> dict[str, Record]:
         ids = list(dict.fromkeys(record_ids))
         where = f" AND {READABLE}" if readable_only else ""
-        rows = self.conn.execute(
-            f"SELECT * FROM records WHERE record_id IN ({_marks(len(ids))}){where}", ids
-        ).fetchall()
+        rows = list(self._in("SELECT * FROM records WHERE record_id IN ({})" + where, ids))
         found = [r["record_id"] for r in rows]
         labels: dict[str, set[str]] = {i: set() for i in found}
-        for rid, source in self.conn.execute(
-            f"SELECT record_id, source_id FROM labels WHERE record_id IN ({_marks(len(found))})",
-            found,
+        for rid, source in self._in(
+            "SELECT record_id, source_id FROM labels WHERE record_id IN ({})", found
         ):
             labels[rid].add(source)
         return {
@@ -307,17 +314,23 @@ class LineageStore:
             " ON CONFLICT DO NOTHING",
             (self.source_ref(source_id), op_id, datetime.now(UTC).isoformat()),
         )
-        held = self.conn.execute(
-            f"UPDATE records SET hold_op_id = ? WHERE record_id IN ({_marks(len(ids))})"
-            " AND hold_op_id IS NULL",
-            [op_id, *ids],
-        ).rowcount
+        held = sum(
+            self.conn.execute(
+                f"UPDATE records SET hold_op_id = ? WHERE record_id IN ({_marks(len(part))})"
+                " AND hold_op_id IS NULL",
+                [op_id, *part],
+            ).rowcount
+            for part in _batches(ids)
+        )
         if held != len(ids):
-            row = self.conn.execute(
-                f"SELECT hold_op_id FROM records WHERE record_id IN ({_marks(len(ids))})"
-                " AND hold_op_id <> ?",
-                [*ids, op_id],
-            ).fetchone()
+            row = next(
+                self._in(
+                    "SELECT hold_op_id FROM records WHERE record_id IN ({}) AND hold_op_id <> ?",
+                    ids,
+                    after=[op_id],
+                ),
+                None,
+            )
             raise OperationInProgressError(
                 str(row[0]) if row else "?", "holding records this retraction needs"
             )
@@ -354,15 +367,14 @@ class LineageStore:
 
     def nodes(self, record_ids: Iterable[str]) -> dict[str, Node]:
         ids = list(dict.fromkeys(record_ids))
-        m = _marks(len(ids))
         explicit: dict[str, set[str]] = {i: set() for i in ids}
-        for rid, source in self.conn.execute(
-            f"SELECT record_id, source_id FROM explicit_sources WHERE record_id IN ({m})", ids
+        for rid, source in self._in(
+            "SELECT record_id, source_id FROM explicit_sources WHERE record_id IN ({})", ids
         ):
             explicit[rid].add(source)
         parents: dict[str, list[tuple[str, str, int]]] = {i: [] for i in ids}
-        for child, parent, kind, pos in self.conn.execute(
-            f"SELECT child_id, parent_id, kind, position FROM edges WHERE child_id IN ({m})"
+        for child, parent, kind, pos in self._in(  # a child's edges share one batch
+            "SELECT child_id, parent_id, kind, position FROM edges WHERE child_id IN ({})"
             " ORDER BY position",
             ids,
         ):
@@ -382,7 +394,7 @@ class LineageStore:
                 explicit_sources=frozenset(explicit[r["record_id"]]),
                 parents=tuple(parents[r["record_id"]]),
             )
-            for r in self.conn.execute(f"SELECT * FROM records WHERE record_id IN ({m})", ids)
+            for r in self._in("SELECT * FROM records WHERE record_id IN ({})", ids)
         }
 
     def set_status(self, record_id: str, status: Status) -> None:

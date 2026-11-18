@@ -554,6 +554,51 @@ rates.
   ($0.15 / $0.60 per million input / output tokens). On `qwen/qwen3.8-27b` (a preview model, a
   different family) it is about $0.72, assuming similar token counts.
 
+### 6.12 Scale (synthetic, 1K–100K records, two runs; `experiments/results/scale.json`)
+
+**Setup** (`python -m experiments.scale --pg <url>`):
+- **World:** U users, each owning 4 records, plus one team note per pair of users derived from both users' records. N = 4.5 U.
+- **Closure:** retracting a user deletes their 4 records and re-derives one note, so the closure is 5 records at every size; only the size of memory changes.
+- **Adapter:** `SimpleVectorStore` with a 32-dimension test embedder. Its search is a linear scan, where a real vector store would use an index.
+- **Machine:** one Windows 11 laptop, Python 3.12.10, with Postgres 17.10 running locally.
+- **Runs:** two full runs, plus a re-run of the SQLite 100K cell after a fix (run 2b, below). One sample per cell per run, so treat these as indicative.
+
+Run 2, with the SQLite 100K column from run 2b. Cells are SQLite / Postgres.
+
+| | 1K records | 10K | 100K |
+|---|---|---|---|
+| write latency, median of the last 500 writes (ms) | 6.5 / 5.5 | 5.7 / 6.1 | 6.6 / 3.3 |
+| raw adapter search (ms, median) | 4.1 / 6.2 | 35.0 / 53.5 | 593 / 420 |
+| one retraction (s) | 0.89 / 1.08 | 6.33 / 7.74 | 66.3 / 53.7 |
+| … residue probes (s) | 0.79 / 0.83 | 5.96 / 7.48 | 54.4 / 52.9 |
+| … everything else: BLOCK, journal, purge, structural checks (s) | 0.09 / 0.25 | 0.37 / 0.25 | 11.9 / 0.81 |
+| 4 disjoint retractions, one after another vs at once (s) | 6.5 vs 2.7 / 6.8 vs 3.1 | 24.8 vs 21.6 / 25.9 vs 26.1 | see standby note vs 233 / 215 vs 227 |
+
+What held in both runs:
+- **Writes do not slow down as memory grows.** The median write stayed at 5.5–10 ms on SQLite and 2–6 ms on Postgres from 1K to 100K records. Which backend wrote faster did not hold up: Postgres was 2.5–5× faster in run 1, but 0.9–2.6× in run 2.
+- **Retraction does slow down, although the closure stays at 5 records.** One retraction took about 1 s at 1K records and 54–68 s at 100K in both runs. Cost grows with the size of memory, not of the closure. Two parts grow:
+  - **Residue probes** go from about 0.8 s to 53–56 s. Most of that is the toy adapter's linear scan: raw search grows from about 5 ms to 0.4–0.6 s. The rest is the post-repair check on each hit, which compares it against every independent primary record in memory.
+  - **Retract's own work** goes from 0.1–0.25 s to 0.8–1.1 s on Postgres, and to 12–13 s on SQLite. VERIFY's global checks scan the whole store: the orphan scan lists every adapter id, and the unreadable-parent check joins all records.
+  - **Next step:** scope those checks to the closure and its neighbors, and index the support lookup, so cost tracks the closure.
+- **Parallel retractions help only when waiting dominates.** Each re-derivation waits 1 s, standing in for a hosted LLM call.
+  - At 1K, 4 retractions with disjoint closures finished 1.8–2.4× faster at once than one after another, on both backends. Before M10 the other three would have been refused.
+  - At 10K and 100K there was no gain (0.76–1.2×). Each op's probe work is CPU-bound Python, and threads in one process share the GIL. Separate processes would overlap that work too, but the in-memory adapter cannot be shared across processes, so that is not measured.
+- **Guarded reads:** the guard added 1.5–6.4 ms per search at 1K. At larger sizes the variance of the raw scan swamps the difference (−164 to +165 ms around a 0.4–0.6 s scan at 100K), so this benchmark does not resolve the guard's cost there.
+
+Found along the way:
+- **A race in VERIFY, seen only at 100K records** (ERRORS 68).
+  - In run 2, 2 of the 4 parallel retractions on SQLite at 100K failed with `no_unrelated_orphans`.
+  - VERIFY's orphan scan is a snapshot. Another op's replacement, pending in the scan, was activated before the check read it again, so it was counted as an orphan.
+  - The scan's duration grows with memory, so the window only opened at 100K. Run 1 had the same bug, but its harness counted only the threads that returned, so it reported every retraction as completed.
+  - VERIFY now re-checks each candidate against current state. In run 2b, with the fix, all 8 retractions completed.
+- **A false alarm on templated text** (ERRORS 66).
+  - In the first version of this world every fact used one template, so unrelated sentences already scored 0.714 against the 0.75 threshold.
+  - A hash collision in the 256-dimension test embedder pushed one sentence to 0.756, and the post-repair check quarantined a clean replacement.
+  - The similarity rule has little margin on near-duplicate text. The benchmark text was changed so that it measures cost. This was seen with the offline test embedder; a real embedding model was not tried.
+- **Standby caveat.** Windows entered Modern Standby several times, even with the app keeping the machine awake (that hold prevents idle sleep only). The system event log gives the windows:
+  - In runs 1 and 2 standby fell inside the 100K builds, whose wall time is not reported. Each write median comes from the last 500 writes, after the standby periods.
+  - In run 2b, 8,691 s of standby fell inside the 4 serial retractions (measured 8,986 s), so that cell is not reported. Net of standby it would be about 295 s, close to run 2's 289 s. The single retraction and the parallel phase had no standby.
+
 ## 7. Negative results and limitations
 
 ### Negative results
@@ -571,6 +616,14 @@ rates.
    one repair, a reminder no longer carries Priya's label.
 6. **The similarity rule alone never catches paraphrases** (6.5). The novel-token rule fixes this
    for paraphrases that keep identifying details, with the limits below.
+7. **Retraction cost grows with the size of memory, not of the closure** (6.12). A 5-record
+   retraction took about 1 s at 1K records and 54–68 s at 100K, because verification and residue
+   probes scan the whole store.
+8. **The similarity rule has little margin on templated text** (6.12). Near-duplicate synthetic
+   facts drew a false alarm through one hash collision in the test embedder.
+9. **A concurrency race showed only at 100K records** (6.12, ERRORS 68). The small-scale
+   concurrency tests and the first benchmark run did not catch it. It is fixed, with a regression
+   test, but other races that need scale to show may remain.
 
 ### Threats to validity
 

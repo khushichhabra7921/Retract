@@ -22,6 +22,9 @@ class Row(tuple[Any, ...]):
     def __getitem__(self, key: Any) -> Any:
         return super().__getitem__(self.names[key] if isinstance(key, str) else key)
 
+    def keys(self) -> list[str]:  # so dict(row) works, as with sqlite3.Row
+        return list(self.names)
+
 
 def _rows(cursor: psycopg.Cursor[Any]) -> Callable[[Sequence[Any]], Row]:
     names = {d.name: i for i, d in enumerate(cursor.description or ())}

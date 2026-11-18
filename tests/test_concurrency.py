@@ -103,6 +103,29 @@ def test_failed_ops_unfinished_replacement_is_not_another_ops_orphan(rt, monkeyp
     assert rt.verify_chain().ok
 
 
+def test_orphan_scan_snapshot_reconciled_since_is_not_an_orphan(rt, monkeypatch):
+    """VERIFY's orphan scan is a snapshot. Another op can activate its write, or purge an item,
+    between the scan and the checks (the scale benchmark hit this at 100K records). Candidates
+    reconciled since are not orphans."""
+    summary = summarizer(rt)
+    summary(inputs=[add(rt, "u_priya"), add(rt, "u_arjun")])
+    mei = add(rt, "u_mei")  # pending in the stale scan, active and unheld now
+    adapter_id = rt.lineage.nodes([mei.record_id])[mei.record_id].adapter_record_id
+    real = rt.orphan_scan
+
+    def stale():
+        report = real()
+        return report.model_copy(
+            update={
+                "pending_no_adapter_record": [mei.record_id],
+                "adapter_no_lineage": [(SUPPORT, adapter_id), (SUPPORT, "purged-since")],
+            }
+        )
+
+    monkeypatch.setattr(rt, "orphan_scan", stale)
+    assert rt.retract(src.user("u_priya")).outcome == "completed"
+
+
 def retract_together(db, rt, owners, plan_first=False):
     """One worker process per owner, each on its own thread with its own connection. Every
     worker retracts at the same instant (after previewing, if `plan_first`). Returns each
@@ -111,7 +134,12 @@ def retract_together(db, rt, owners, plan_first=False):
     out = [None] * len(owners)
 
     def run(i):
-        w = Retract(db, stores=rt.stores)
+        try:
+            w = Retract(db, stores=rt.stores)
+        except Exception as e:  # reported like any other failure, never lost in the thread
+            out[i] = e
+            barrier.abort()
+            return
         summarizer(w)
         try:
             plan = w.retract(src.user(owners[i]), dry_run=True) if plan_first else None

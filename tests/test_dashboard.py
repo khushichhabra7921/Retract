@@ -13,8 +13,8 @@ from retract.dashboard.demo import build  # noqa: E402
 
 
 @pytest.fixture
-def client(tmp_path):
-    app = create_app(lambda: build(tmp_path))
+def client(db):
+    app = create_app(lambda: build(db))
     with TestClient(app) as c:  # runs the lifespan, so the Retract instance is closed after
         yield c
 

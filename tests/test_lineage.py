@@ -167,3 +167,16 @@ def test_derive_op_registered_once(rt):
     concat(rt, "op")
     with pytest.raises(ValueError):
         concat(rt, "op")
+
+
+def test_long_id_lists_are_split_into_batches(rt, monkeypatch):
+    monkeypatch.setattr("retract.core.lineage.BATCH", 2)  # real cap: 30,000 ids per statement
+    derive = concat(rt)
+    priya = [add(rt, f"Priya fact {i}.", "u_priya") for i in range(5)]
+    arjun = add(rt, "Arjun renews in March.", "u_arjun")
+    summary = derive(inputs=[*priya, arjun])
+    assert len(rt.lineage.nodes(rt.closure(src.user("u_priya")))) == 6
+    receipt = rt.retract(src.user("u_priya"))  # BLOCK holds 6 records in 3 batches
+    assert receipt.outcome == "completed" and receipt.verify().ok
+    assert rt.get(summary.record_id) is None
+    assert [r.content for r in rt.search("arjun", tier="shared")] == ["Arjun renews in March."]

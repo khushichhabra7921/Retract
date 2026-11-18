@@ -288,3 +288,30 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
 ### 63. New threaded tests failed on SQLite: "SQLite objects created in a thread can only be used in that same thread"
 - **Cause:** a test bug. The worker `Retract` instances were opened on the main thread and used on worker threads.
 - **Fix:** each worker opens its own connection inside its thread.
+
+### 64. Dashboard on Postgres: "dictionary update sequence element #0 has length 32; 2 is required"
+- **Cause:** the op page calls `dict(op)`. `sqlite3.Row` supports that through `keys()`; the Postgres row class did not have `keys()`.
+- **Fix:** `Row.keys()`, so `dict(row)` works on both backends.
+
+### 65. Scale benchmark: "RETRACT_PSEUDONYM_KEY is not set in the process environment"
+- **Cause:** the new script did not set keys, unlike `experiments.run`.
+- **Fix:** ephemeral random keys when unset, as in `experiments.run` (synthetic data only).
+
+### 66. Scale benchmark: false alarms on its own synthetic text
+- **Cause:** a property of the data and the offline embedder, not of the store.
+  - The first world reused one template, so unrelated sentences shared 5 of 7 words (similarity 0.714, threshold 0.75).
+  - A hash collision in the 256-dimension test embedder between "Team note" and an id pushed one replacement to 0.756, so the post-repair check quarantined it (`contained`).
+  - With shorter facts, the prefix still shared a sentence with copied facts and drew a retrieval-residue failure.
+- **Fix:** fewer shared words per fact, and the note prefix as its own sentence, so each note sentence equals a support sentence. The finding itself is reported in RESULTS 6.12.
+
+### 67. Scale benchmark: 4 parallel retractions on threads were no faster than serial
+- **Cause:** not a lock problem. Residue probes and the post-repair check are CPU-bound Python, which the GIL serializes across threads; only the simulated LLM wait overlapped.
+- **Fix:** none needed in the store. The simulated LLM wait went from 0.2 s to 1 s, closer to a hosted call, and the limit is stated with the results.
+
+### 68. Scale benchmark run 2: 2 of 4 parallel retractions failed VERIFY with `no_unrelated_orphans` (SQLite, 100K records)
+- **Cause:** a race in VERIFY, not in the locks. The orphan scan is a snapshot.
+  - Op A's scan listed op B's replacement as a pending row, and B's adapter item as unknown to lineage.
+  - Before A checked those candidates, B activated the row and cleared its hold. A re-read the row, saw no hold, and counted it as an unrelated orphan.
+  - The window is the scan itself, which grows with memory: a linear `find_by_token` per pending row and a full `list_ids`. At 1K–10K records it never showed.
+- **Why run 1 missed it:** its parallel harness reported `sorted(set(outcomes))`. A thread that raised appended nothing, so 2 failures out of 8 still read as `["completed"]`. The harness now counts every result, and a failure is recorded as its exception text.
+- **Fix:** VERIFY re-checks each candidate against current state. A pending candidate counts only if it is still pending. An adapter item counts only if it still exists and no lineage row points at it now. Regression test: `test_orphan_scan_snapshot_reconciled_since_is_not_an_orphan` feeds VERIFY a stale scan. It fails without the fix.

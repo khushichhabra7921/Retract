@@ -31,11 +31,10 @@ FACTS = (
 )
 
 
-def build(path: Path) -> Retract:
+def build(db: str | Path) -> Retract:
+    """The demo world in a fresh lineage store: a SQLite file path or an empty Postgres DB."""
     llm = FakeLLM()
-    rt = Retract(
-        path / "lineage.db", stores={t: SimpleVectorStore() for t in (SUPPORT, PLANNING, SHARED)}
-    )
+    rt = Retract(db, stores={t: SimpleVectorStore() for t in (SUPPORT, PLANNING, SHARED)})
 
     def summarize(prefix: str) -> Callable[[list[Record]], str]:
         return lambda inputs: prefix + llm.summarize([r.content or "" for r in inputs])
@@ -77,7 +76,7 @@ def serve(port: int, directory: Path | None = None) -> None:
     ensure_keys()
     path = directory or Path(tempfile.mkdtemp(prefix="retract-demo-"))
     path.mkdir(parents=True, exist_ok=True)
-    app = create_app(lambda: build(path))
+    app = create_app(lambda: build(path / "lineage.db"))
     print(f"Retract demo on http://127.0.0.1:{port}  (lineage: {path / 'lineage.db'})")
     print("Try: Operations > the failed op > Resume; then Sources > user:u_priya > preview.")
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

@@ -125,6 +125,10 @@ FakeLLM, 30 paired test seeds, three scenarios: a user deletion, a false documen
   - a Retract write is about 40–55× a raw adapter write (durable SQLite commits);
   - a guarded read is about 1.9× a raw read;
   - a 54-record retraction takes about 1.4–1.9 s plus LLM latency.
+- **Scale** (synthetic, 1K–100K records, two runs; [details](docs/RESULTS.md#612-scale-synthetic-1k100k-records-two-runs-experimentsresultsscalejson)):
+  - write latency stays flat as memory grows: 2–6 ms on Postgres and 5.5–10 ms on SQLite;
+  - a 5-record retraction takes about 1 s at 1K records but 54–68 s at 100K, because verification and residue probes scan the whole store. This is the next bottleneck;
+  - 4 retractions with disjoint closures run 1.8–2.4× faster in parallel at 1K, but not at 10K–100K, where CPU-bound checks share one Python process.
 - **Hosted LLM** (Groq `openai/gpt-oss-120b`, 1 seed, so illustrative only; run before the latest changes): with the false policy in memory, 20/20 answers were wrong. Naive delete changed nothing, and every Retract mode restored 20/20 correct answers ([results](docs/RESULTS.md#611-hosted-llm-groq-openaigpt-oss-120b-n--1-experimentsresultsgroq)).
 
 ## Limits
@@ -134,7 +138,7 @@ FakeLLM, 30 paired test seeds, three scenarios: a user deletion, a false documen
 - **The runtime check is a heuristic:** sentence and embedding match, plus novel tokens. It misses paraphrases that drop every identifying detail, and its false-alarm rate on real LLM output is measured on only 54 replacements.
 - **Only `@rt.derives` writes can be rebuilt.** A record written in `rt.step` without a registered function cannot be replayed, so `auto` mode quarantines it.
 - **Re-derivation by replay** uses old inputs minus the retracted ones, so repaired memory can differ from a clean history. `refetch=True` re-runs retrieval instead, but searches during repair cannot see records of the same closure that are not yet repaired.
-- **Concurrency:** retractions run in parallel when their closures are disjoint. One whose closure overlaps a running or failed operation is refused until that operation finishes or is resumed. Throughput at scale is not benchmarked: the largest test retracts 54 records.
+- **Concurrency:** retractions run in parallel when their closures are disjoint. One whose closure overlaps a running or failed operation is refused until that operation finishes or is resumed. Retraction cost grows with the size of memory, not of the closure ([scale results](docs/RESULTS.md#612-scale-synthetic-1k100k-records-two-runs-experimentsresultsscalejson)).
 - **Receipts:** anyone with database write access *and* the signing key can rewrite history.
 - **Status:** pre-alpha; APIs may change.
 
@@ -143,7 +147,7 @@ FakeLLM, 30 paired test seeds, three scenarios: a user deletion, a false documen
 - Hosted-LLM results with more seeds and a second model (the harness is ready: `--seeds N --model ...`).
 - A semantic check for paraphrases that drop identifying details, and a false-alarm measurement on real LLM output.
 - More adapters: managed vector stores and LangGraph store integration.
-- A scale benchmark on Postgres (100K–1M records) before any throughput claim.
+- Verification scoped to the closure and an indexed support lookup, so retraction cost tracks the closure, not the store.
 - Cross-module dataflow in `retract audit`.
 - Erasure work beyond L2: vector-index internals.
 
@@ -204,6 +208,7 @@ RETRACT_TEST_PG=postgresql://postgres@127.0.0.1:5432/postgres make test
 | `make experiments` | FakeLLM experiments and the cost benchmark (about 4 min) |
 | `make experiments-groq` | Hosted-LLM experiments (needs `GROQ_API_KEY`) |
 | `make experiments-groq-replay` | The same results from the committed response cache, with no key |
+| `uv run --extra postgres python -m experiments.scale --pg <url>` | Scale benchmark at 1K, 10K and 100K records, SQLite and Postgres (about an hour) |
 
 ## Secrets
 

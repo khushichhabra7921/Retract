@@ -426,21 +426,24 @@ class Engine:
         orphans = self.rt.orphan_scan()
         pending = orphans.pending_no_adapter_record + orphans.pending_adapter_written
         # A pending replacement held by another op is that op's in-flight write: its own
-        # repair or resume reconciles it, so it is not an orphan here.
+        # repair or resume reconciles it, so it is not an orphan here. The scan is a snapshot,
+        # so each candidate is re-read: another op may have activated it since.
         unrelated = [
             i
             for i, n in self.lineage.nodes(set(pending) - ours).items()
-            if n.hold_op_id in (None, op_id)
+            if n.status == "pending" and n.hold_op_id in (None, op_id)
         ]
         stray_ours: list[str] = []
         stray_other: list[str] = []
         for tier, adapter_id in orphans.adapter_no_lineage:
             item = self.rt._store(tier).get(adapter_id)
-            meta = item.metadata if item else {}
-            owner = meta.get("retract_token", "").partition(":")[0]
-            if meta.get("record_id") in ours or owner == op_id:
+            if item is None:  # deleted since the scan
+                continue
+            record_id = item.metadata.get("record_id")
+            owner = item.metadata.get("retract_token", "").partition(":")[0]
+            if record_id in ours or owner == op_id:
                 stray_ours.append(adapter_id)
-            elif not self._in_flight(owner):
+            elif not self._in_flight(owner) and not self._tracked(record_id, adapter_id):
                 stray_other.append(adapter_id)
         groups = {
             "source": {
@@ -498,6 +501,11 @@ class Engine:
         """Another operation that has not finalized (its writes are its own to reconcile)."""
         op = self.journal.get(op_id)
         return op is not None and op["state"] != "finalized"
+
+    def _tracked(self, record_id: str | None, adapter_id: str) -> bool:
+        """A lineage row points at the adapter item now (activated since the orphan scan)."""
+        node = self.lineage.nodes([record_id]).get(record_id) if record_id else None
+        return node is not None and node.adapter_record_id == adapter_id
 
     def _finalize(self, op_id: str, verification: dict[str, Any]) -> receipts.Receipt:
         op = self.journal.get(op_id)
