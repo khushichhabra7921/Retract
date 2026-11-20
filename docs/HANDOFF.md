@@ -253,10 +253,19 @@ count extra). Check Settings → Billing → Actions if you push often.
 
 ### 6.1 Tools
 
-`uv` lives in `C:\Users\hp\AppData\Roaming\Python\Python312\Scripts`. If PowerShell says `uv` is
-not recognized, add that folder to PATH (Windows search → "Edit environment variables for your
-account" → Path → New), then open a new window. `uv sync --extra testbed --extra llm --extra dashboard --extra postgres`
-installs everything.
+Your own PowerShell has no `uv`. The copy Claude Code used was installed inside the Claude app's
+private AppData, which other programs cannot see. Install your own once:
+
+```powershell
+python -m pip install uv
+```
+
+If `uv` is then still "not recognized", write `python -m uv` wherever this guide says `uv`, for
+example `python -m uv run --extra testbed --extra llm python -m experiments.run --llm groq --seeds 5`.
+
+Plain `python -m experiments.run ...` fails with `No module named 'pydantic'`: that is your global
+Python, not the project's `.venv`. Always start commands with `uv run`. `uv sync --extra testbed
+--extra llm --extra dashboard --extra postgres` installs everything.
 
 ### 6.2 Postgres tests (optional; CI runs them anyway)
 
