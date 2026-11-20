@@ -14,8 +14,8 @@ cd C:\Users\hp\OneDrive\Desktop\Retract
 | SDK, engine, receipts, dashboard, audit, testbed, FakeLLM experiments | Done and committed |
 | Postgres backend, per-closure locks, id-list batching, VERIFY race fix | Done and committed (`44d3b21`, `b510f04`) |
 | Scale benchmark (1K–100K records, two runs) | Done; results in `experiments/results/scale.json` and RESULTS 6.12 |
-| Groq 5-seed runs | In progress. Cache at Nov 18: gpt-oss 1,136 responses, qwen 1,461. Each needs about 2,740 |
-| Tests | 183 pass on SQLite and Postgres; ruff and mypy clean |
+| Groq 5-seed runs | In progress. Cache at Nov 20: gpt-oss 1,732 responses, qwen 2,340. Qwen's live run finished on Nov 20, but its replay failed: repair order was random (ERRORS 69). Fixed on Nov 20; **both models must be run again** (section 2) until each finishes and its replay passes (section 3). The untracked `experiments/results/groq-qwen-qwen3.8-27b/` from Nov 20 is stale: do not commit it; the next qwen run overwrites it |
+| Tests | 184 pass on SQLite and Postgres; ruff and mypy clean |
 | GitHub | Everything pushed (`bf666a3`). CI passed on Nov 18, all four jobs including the new `postgres` job |
 
 The only required work left is finishing the Groq runs and writing up their results (sections 2–4).
@@ -28,6 +28,11 @@ so this guide gives the full `uv` command each time. If you install make later, 
 targets run the same commands.
 
 ## 2. Daily Groq runs (until both models finish)
+
+Since the Nov 20 fix (ERRORS 69), repairs run in a fixed order. Responses cached before it still
+serve every prompt that did not depend on the order, such as building each world before the
+retraction. The rest, at least the `refetch` trials, are fetched again. Expect about one more day
+for qwen; gpt-oss continues as before. This is an estimate.
 
 ### 2.1 Each day
 
@@ -71,13 +76,14 @@ targets run the same commands.
 Get-Content experiments\cache\groq.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Group-Object model | ForEach-Object { [pscustomobject]@{ Model = $_.Name; Responses = $_.Count; Tokens = (($_.Group | ForEach-Object { $_.usage.total_tokens }) | Measure-Object -Sum).Sum } } | Format-Table -AutoSize
 ```
 
-Each model needs about 2,740 responses (an estimate: 548 per seed × 5 seeds). The run itself is the
+Qwen's finished run used 2,340 responses; gpt-oss should need a similar number, plus the refetches
+after the Nov 20 fix. These are estimates. The run itself is the
 real signal: a model is done only when its command ends with `results: ...`.
 
 ### 2.4 Limits and cost
 
 - Groq's free plan allows 200K tokens per day per model. In practice it behaved as a rolling 24-hour window: a second run the same day gets only what is left of the 200K.
-- gpt-oss uses about 550 tokens per response, so about 350 responses per day: roughly 5 more days. qwen uses about 265, so about 700 per day: roughly 2 more days.
+- gpt-oss uses about 550 tokens per response, so about 350 responses per day: roughly 2–4 more days from Nov 20. qwen uses about 265, so about 700 per day: roughly 1 more day.
 - Confirm once on the Groq console's billing page (console.groq.com) that the account is on the **Free** plan with no card attached, so nothing can be charged.
 
 ## 3. When a model finishes
@@ -103,6 +109,13 @@ Do this once per model. The commands below are for gpt-oss; for qwen, add
    `git status` must print nothing: the replay rewrote identical files. If it lists changed files,
    run `git diff experiments/results` to see what changed, and do not write up the results until
    that is understood.
+
+   If the replay stops with `replay: no cached response for this <model> request`, the cache is
+   missing responses the results need. Set the key (2.1 step 1), run the live command for that
+   model once more (it fetches only what is missing), commit the results and cache again, and
+   repeat this replay. If it fails the same way twice in a row, something in the run is not
+   repeatable again: compare the `failed at <scenario> seed <n> <config>` line with ERRORS 69,
+   and do not write up that model's results.
 
 3. `git push`.
 
@@ -211,7 +224,7 @@ uv run --extra testbed --extra llm --extra dashboard --extra postgres python -m 
 ```
 
 All must pass. Without `RETRACT_TEST_PG` (6.2) only the SQLite variants run, so expect fewer
-than the 183 tests counted with Postgres. Then:
+than the 184 tests counted with Postgres. Then:
 
 ```powershell
 git add experiments/configs.py docs/RESULTS.md README.md docs/PLAN.md

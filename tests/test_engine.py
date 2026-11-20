@@ -432,3 +432,22 @@ def test_source_specific_residue_is_reported_separately(rt, world, monkeypatch):
     cause = e.value.__cause__
     assert cause.source_failures == ["no_readable_record_carries_source_label"]
     assert cause.global_failures == []
+
+
+def test_repair_order_follows_creation_not_random_ids():
+    """Record ids are random, so an order built on them changes from run to run; refetch then
+    sees different worlds and cached LLM runs stop replaying (ERRORS 69)."""
+    from retract.core.engine import Engine
+    from retract.core.lineage import Node, _stamp
+
+    def node(rid, created, parents=()):
+        return Node(rid, "a", "t", None, "active", None, rid, None, None, None, frozenset(),
+                    tuple((p, "input", i) for i, p in enumerate(parents)), created)  # fmt: skip
+
+    # creation order x, z, y, w, with y a child of z; ordering by id would give w, x, z, y
+    nodes = {n.record_id: n for n in [
+        node("x", "1"), node("z", "2"), node("w", "4"), node("y", "3", parents=["z"]),
+    ]}  # fmt: skip
+    assert Engine._topo(nodes) == ["x", "z", "y", "w"]
+    stamps = [_stamp() for _ in range(1000)]
+    assert stamps == sorted(set(stamps))  # strictly increasing, even within one clock tick

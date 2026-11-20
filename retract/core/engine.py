@@ -6,6 +6,7 @@ Every later phase is idempotent against the journal, so `resume` simply re-runs 
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import logging
 import uuid
@@ -83,6 +84,13 @@ class Engine:
 
     @staticmethod
     def _topo(nodes: Mapping[str, Node]) -> list[str]:
+        """Parents before children; otherwise creation order. Record ids are random, so any
+        order that depends on them changes from run to run, and refetch repairs (whose searches
+        skip closure records not yet repaired) would see different worlds."""
+
+        def created(i: str) -> tuple[str, str]:
+            return nodes[i].created_at, i
+
         indegree = dict.fromkeys(nodes, 0)
         children: dict[str, list[str]] = {i: [] for i in nodes}
         for i, n in nodes.items():
@@ -90,7 +98,7 @@ class Engine:
                 if p in nodes:
                     indegree[i] += 1
                     children[p].append(i)
-        ready = sorted(i for i, d in indegree.items() if d == 0)
+        ready = sorted((i for i, d in indegree.items() if d == 0), key=created)
         order: list[str] = []
         while ready:
             i = ready.pop(0)
@@ -98,7 +106,7 @@ class Engine:
             for c in children[i]:
                 indegree[c] -= 1
                 if indegree[c] == 0:
-                    ready.append(c)
+                    bisect.insort(ready, c, key=created)
         return order
 
     def _decide(self, source: str, mode: Mode, nodes: Mapping[str, Node]) -> list[PlannedAction]:

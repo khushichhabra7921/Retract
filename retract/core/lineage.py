@@ -17,10 +17,11 @@ import hashlib
 import hmac
 import json
 import sqlite3
+import threading
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -49,6 +50,20 @@ def _marks(n: int) -> str:
 def _batches(ids: Sequence[str]) -> Iterator[Sequence[str]]:
     """Non-empty slices of at most BATCH ids (Postgres also rejects an empty `IN ()`)."""
     return (ids[i : i + BATCH] for i in range(0, len(ids), BATCH))
+
+
+_stamp_lock = threading.Lock()
+_last_stamp = datetime.min.replace(tzinfo=UTC)
+
+
+def _stamp() -> str:
+    """Now, strictly increasing within the process. Repair order follows creation order, and
+    the clock can tick slower than writes (about 1 ms on Windows), so equal stamps would leave
+    the tie to random record ids and make runs unrepeatable."""
+    global _last_stamp
+    with _stamp_lock:
+        _last_stamp = max(datetime.now(UTC), _last_stamp + timedelta(microseconds=1))
+        return _last_stamp.isoformat(timespec="microseconds")
 
 
 class Cursor(Protocol):
@@ -87,6 +102,7 @@ class Node:
     fn_version: str | None
     explicit_sources: frozenset[str]
     parents: tuple[tuple[str, str, int], ...]  # (parent_id, kind, position), position order
+    created_at: str
 
 
 class LineageStore:
@@ -235,7 +251,7 @@ class LineageStore:
                     fn_version,
                     hold_op_id,
                     supersedes,
-                    datetime.now(UTC).isoformat(),
+                    _stamp(),
                 ),
             )
             c.executemany(
@@ -393,6 +409,7 @@ class LineageStore:
                 fn_version=r["fn_version"],
                 explicit_sources=frozenset(explicit[r["record_id"]]),
                 parents=tuple(parents[r["record_id"]]),
+                created_at=r["created_at"],
             )
             for r in self._in("SELECT * FROM records WHERE record_id IN ({})", ids)
         }

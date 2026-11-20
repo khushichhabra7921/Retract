@@ -315,3 +315,14 @@ Every error, failure or wrong result hit while building the Mem0 spike and M0–
   - The window is the scan itself, which grows with memory: a linear `find_by_token` per pending row and a full `list_ids`. At 1K–10K records it never showed.
 - **Why run 1 missed it:** its parallel harness reported `sorted(set(outcomes))`. A thread that raised appended nothing, so 2 failures out of 8 still read as `["completed"]`. The harness now counts every result, and a failure is recorded as its exception text.
 - **Fix:** VERIFY re-checks each candidate against current state. A pending candidate counts only if it is still pending. An adapter item counts only if it still exists and no lineage row points at it now. Regression test: `test_orphan_scan_snapshot_reconciled_since_is_not_an_orphan` feeds VERIFY a stale scan. It fails without the fix.
+
+### 69. Groq replay: "replay: no cached response for this qwen/qwen3.8-27b request" (poisoned_doc seed 11 refetch)
+- **Cause:** repair order depended on random record ids. `Engine._topo` broke ties between ready records by `record_id` (a `uuid4`), and took children in the order of an unordered SQL result.
+  - `refetch` re-runs searches during repair, and records of the closure not yet repaired are held, so they are skipped. Its search results, and so its prompts, depended on the order.
+  - The write order of replacements also changed, and the toy vector store breaks search ties by insertion order. So `auto` could change too when texts tie, which FakeLLM's concatenated summaries do often.
+  - A FakeLLM check confirmed it: the same trial in separate processes sent different request sets (`refetch` 2 of 3 runs, `auto` 2 of 2).
+  - The live qwen run finished, because each process fetched what it needed. The no-key replay, in a new process with new ids, missed the cache.
+- **Fix:** repair in creation order. `_topo` breaks ties by `(created_at, record_id)`, and `created_at` is stamped strictly increasing within a process, because the Windows clock ticks about once a millisecond, slower than writes. After the fix, five trials across all three scenarios gave identical requests in 3 of 3 processes. Test: `test_repair_order_follows_creation_not_random_ids`.
+- **Consequence:** results produced before the fix were one sample of a random repair order.
+  - Re-running the FakeLLM experiments after the fix gave byte-identical `experiments/results/fake` files, so no published FakeLLM number changed. Only the LLM requests differed, not the measured outcomes.
+  - Groq trials whose prompts depend on the order (at least `refetch`) need new live calls before the no-key replay can pass.
